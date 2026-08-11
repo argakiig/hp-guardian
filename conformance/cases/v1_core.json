@@ -28,5 +28,95 @@
     "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: \"[\"\n",
     "call": {"args": [], "context": {}},
     "expect_error": "invalid_regex"
+  },
+  {
+    "name": "Rust-only regex syntax is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: '\\p{Greek}+'\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_regex"
+  },
+  {
+    "name": "character classes are outside the portable regex subset",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: '[(?=]'\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_regex"
+  },
+  {
+    "name": "end anchors do not match before a trailing newline",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: '^foo$'\n",
+    "call": {"args": ["foo\n"], "context": {}},
+    "expect": {"decision": "allow", "matched_rules": []}
+  },
+  {
+    "name": "ambiguous boolean-like target is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      tool: yes\n",
+    "call": {"tool": "yes", "args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "ambiguous timestamp-like target is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      tool: 2026-08-11\n",
+    "call": {"tool": "2026-08-11", "args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "ambiguous sexagesimal target is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      tool: 1:20\n",
+    "call": {"tool": "1:20", "args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "ambiguous YAML 1.2 octal target is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      tool: 0o12\n",
+    "call": {"tool": "0o12", "args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "ambiguous leading-zero target is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      tool: 012\n",
+    "call": {"tool": "012", "args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "ambiguous exponent target is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      tool: 1e2\n",
+    "call": {"tool": "1e2", "args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "missing action has a stable error code",
+    "policy": "version: 1\nrules:\n  - condition: {}\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_action"
+  },
+  {
+    "name": "non-mapping target has a stable error code",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target: []\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "non-mapping condition has a stable error code",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition: []\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "non-string target key has a stable error code",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target: {1: x}\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "non-string context target key has a stable error code",
+    "policy": "version: 1\nrules:\n  - action: deny\n    target:\n      context: {1: x}\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_target"
+  },
+  {
+    "name": "non-string condition key has a stable error code",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition: {1: x}\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_condition"
   }
 ]

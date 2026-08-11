@@ -37,6 +37,12 @@ agents:
 
 `version` is required and currently must be the integer `1`.
 
+To avoid YAML 1.1/1.2 resolver differences, v1 rejects ambiguous scalar-looking
+values in string fields: boolean/null words, timestamp-like values, and numeric
+forms such as sexagesimal, leading-zero, hexadecimal, octal, or exponent
+notation. Use an unambiguous identifier instead; quoting does not alter this
+v1 validation rule.
+
 ### Rule fields
 
 - `id` — optional stable policy-author-supplied identifier. It must be unique
@@ -56,10 +62,13 @@ They may repeat those values but may not override them.
 characters, including `/`. It does not resolve links, normalize paths, or act
 as a sandbox boundary.
 
-`args_match` uses the portable subset common to Rust `regex` and Python `re`.
-v1 forbids look-around assertions and backreferences. New regex constructs
-require a fixture proving equal results in both runtimes before they enter the
-contract.
+`args_match` is a v1 portable pattern language, not either runtime's native
+regex. It supports literals, `.`, `*` applied to the preceding literal or `.`,
+the boundary anchors `^` and `$`, and escaping `\\`, `.`, `*`, `^`, or `$`.
+`.` matches every Unicode code point, including newlines. Character classes,
+groups, alternation, `+`, `?`, look-around assertions, and backreferences are
+errors. New constructs require a fixture proving equal results in both
+runtimes before they enter the contract.
 
 ### Resolution
 
@@ -105,7 +114,7 @@ runtime must produce the fixture's decision, matching rules, or error code.
 ## Commands
 
 ```bash
-PYTHONPATH=src python -m pytest tests
+PYTHONPATH=src uv run --with pyyaml --with pytest python -m pytest tests
 cargo test
 cargo fmt --check
 cargo clippy -- -D warnings

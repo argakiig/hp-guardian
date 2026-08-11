@@ -1,4 +1,10 @@
-# Hardpoint Guardian — Spec v0.1
+# Hardpoint Guardian — Product Vision v0.1
+
+> This document records the broad product vision. The currently implemented,
+> normative contract for both runtimes is [Policy Language v1](policy-language-v1.md).
+> Fields described here that are absent from v1, including rate limits, memory
+> policy, scripting, and multi-action rules, are deferred capabilities and must
+> not be accepted silently by a v1 runtime.
 
 ## Overview
 
