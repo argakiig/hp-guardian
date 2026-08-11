@@ -2,95 +2,137 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-from hp_guard.audit import AuditLog, AuditError
-
-FIXTURE_PATH = Path(__file__).parent.parent / "conformance" / "cases" / "durable_log_recovery_v1.json"
-FIXTURE = json.loads(FIXTURE_PATH.read_text())
+from hp_guard.audit import AuditError, AuditLog
 
 
-def _setup_tmp_path(name: str) -> Path:
-    directory = Path(__file__).parent.parent / "var" / "_recovery_test" / name
-    directory.mkdir(parents=True, exist_ok=True)
-    # Clean previous runs
-    for child in directory.iterdir():
-        child.unlink()
-    return directory
+FIXTURE = json.loads(
+    (Path(__file__).parent.parent / "conformance" / "cases" / "durable_log_recovery_v1.json").read_text()
+)
 
 
-class TestTailRecovery:
-    @pytest.fixture(autouse=True)
-    def _cleanup(self, tmp_path):
-        self.tmp_path = tmp_path
-        yield tmp_path
-        # nothing extra needed; tmp_path is auto-cleaned
+def _bytes(entry: dict[str, str]) -> bytes:
+    if set(entry) == {"utf8"}:
+        return entry["utf8"].encode("utf-8")
+    if set(entry) == {"hex"}:
+        return bytes.fromhex(entry["hex"])
+    raise AssertionError(f"invalid fixture file entry: {entry}")
 
-    def _write(self, path: Path, data: str | bytes):
-        if isinstance(data, str):
-            path.write_bytes(data.encode("utf-8"))
-        else:
-            path.write_bytes(data)
 
-    def test_valid_torn_tail_is_truncated(self):
-        log = AuditLog(self.tmp_path / "audit.jsonl")
-        before = (
-            '{"timestamp":"2026-08-11T00:00:00Z","event":"activation"}\n'
-            '{"timestamp":"2026-08-11T00:00:01Z","event":"authorization"}\n'
-            '{"partial'
+def _path(root: Path, name: str, transaction_id: str | None = None) -> Path:
+    active = root / "audit.jsonl"
+    if name == "active":
+        return active
+    if name.startswith("backup_"):
+        return active.with_name(f"{active.name}.{name.removeprefix('backup_')}")
+    transaction_id = transaction_id or "orphan"
+    if name == "stage_active":
+        return active.with_name(f"{active.name}.rotation.{transaction_id}.active")
+    if name.startswith("stage_backup_"):
+        return active.with_name(
+            f"{active.name}.rotation.{transaction_id}.backup.{name.removeprefix('stage_backup_')}"
         )
-        self._write(self.tmp_path / "audit.jsonl", before)
+    raise AssertionError(f"unknown fixture path name: {name}")
 
-        with pytest.raises(AttributeError):
-            log.recover()
 
-    def test_malformed_complete_line_blocks(self):
-        log = AuditLog(self.tmp_path / "audit.jsonl")
-        self._write(
-            self.tmp_path / "audit.jsonl",
-            '{"timestamp":"2026-08-11T00:00:00Z","event":"activation"}\n{bad json',
-        )
-        with pytest.raises(AttributeError):
-            log.recover()
+def _write_case(root: Path, case: dict) -> dict[Path, bytes]:
+    manifest = case.get("manifest")
+    transaction_id = manifest["transaction_id"] if manifest else None
+    before: dict[Path, bytes] = {}
+    for name, entry in case.get("files", {}).items():
+        path = _path(root, name, transaction_id)
+        content = _bytes(entry)
+        path.write_bytes(content)
+        before[path] = content
+    if manifest:
+        path = root / "audit.jsonl.rotation.json"
+        content = json.dumps(manifest, separators=(",", ":")).encode("utf-8")
+        path.write_bytes(content)
+        before[path] = content
+    return before
 
-    def test_invalid_utf8_blocks(self):
-        log = AuditLog(self.tmp_path / "audit.jsonl")
-        self._write(
-            self.tmp_path / "audit.jsonl",
-            '{"timestamp":"2026-08-11T00:00:00Z","event":"activation"}\n\xff\xfe',
-        )
-        with pytest.raises(AttributeError):
-            log.recover()
 
-    def test_empty_line_blocks(self):
-        log = AuditLog(self.tmp_path / "audit.jsonl")
-        self._write(
-            self.tmp_path / "audit.jsonl",
-            '{"timestamp":"2026-08-11T00:00:00Z","event":"activation"}\n\nmore',
-        )
-        with pytest.raises(AttributeError):
-            log.recover()
+def _trigger_recovery(root: Path) -> None:
+    AuditLog(root / "audit.jsonl").append({"event": "post_recovery"})
 
-    def test_parseable_unterminated_object_blocks(self):
-        log = AuditLog(self.tmp_path / "audit.jsonl")
-        self._write(
-            self.tmp_path / "audit.jsonl",
-            '{"timestamp":"2026-08-11T00:00:00Z","event":"activation"}\n'
-            '{"timestamp":"2026-08-11T00:00:01Z","event":"authorization"',
-        )
-        with pytest.raises(AttributeError):
-            log.recover()
 
-    def test_torn_tail_with_secrets_preserves_valid_prefix(self):
-        log = AuditLog(self.tmp_path / "audit.jsonl")
-        self._write(
-            self.tmp_path / "audit.jsonl",
-            '{"timestamp":"2026-08-11T00:00:00Z","event":"authorization","correlation_id":"secret-token"}\n'
-            "{torn_secret",
-        )
-        with pytest.raises(AttributeError):
-            log.recover()
+@pytest.mark.parametrize("case", FIXTURE["tail_recovery"], ids=lambda case: case["name"])
+def test_tail_recovery_matches_shared_fixture(tmp_path: Path, case: dict) -> None:
+    before = _write_case(tmp_path, case)
+    expected = case["expect"]
+
+    if expected["error"] is not None:
+        with pytest.raises(AuditError) as raised:
+            _trigger_recovery(tmp_path)
+        assert raised.value.code == expected["error"]
+        if expected.get("unchanged"):
+            assert {path: path.read_bytes() for path in before} == before
+        return
+
+    _trigger_recovery(tmp_path)
+    active = (tmp_path / "audit.jsonl").read_bytes()
+    assert active.startswith(expected.get("active_prefix", "").encode("utf-8"))
+    if expected.get("recovered_tail"):
+        assert b'{"partial' not in active
+        assert b"{torn" not in active
+        assert b"{torn_secret" not in active
+        for line in active.splitlines():
+            json.loads(line)
+    for name, prefix in expected.get("backup_prefixes", {}).items():
+        assert _path(tmp_path, name).read_bytes() == prefix.encode("utf-8")
+
+
+@pytest.mark.parametrize("case", FIXTURE["rotation_recovery"], ids=lambda case: case["name"])
+def test_rotation_recovery_matches_shared_fixture(tmp_path: Path, case: dict) -> None:
+    before = _write_case(tmp_path, case)
+    expected = case["expect"]
+
+    if expected["error"] is not None:
+        with pytest.raises(AuditError) as raised:
+            _trigger_recovery(tmp_path)
+        assert raised.value.code == expected["error"]
+        if expected.get("unchanged"):
+            assert {path: path.read_bytes() for path in before} == before
+        return
+
+    _trigger_recovery(tmp_path)
+    assert not (tmp_path / "audit.jsonl.rotation.json").exists()
+    assert not list(tmp_path.glob("audit.jsonl.rotation.*"))
+    for name, content in expected["backups"].items():
+        assert _path(tmp_path, name).read_bytes() == content.encode("utf-8")
+
+
+def test_second_process_cannot_acquire_the_shared_audit_lease(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from hp_guard.audit import AuditLog; "
+                f"log = AuditLog({os.fspath(path)!r}); "
+                "log.append({'event': 'holder'}); "
+                "print('ready', flush=True); "
+                "input(); log.close()"
+            ),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "ready"
+        with pytest.raises(AuditError) as raised:
+            AuditLog(path).append({"event": "contender"})
+        assert raised.value.code == FIXTURE["lock_contention"]["expected_error"]
+    finally:
+        assert holder.stdin is not None
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        holder.wait(timeout=5)

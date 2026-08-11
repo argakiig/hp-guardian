@@ -54,7 +54,8 @@ multi-writer, replicated, encrypted, or tamper-evident service.
 
 - Rotation uses a regular-file manifest at `&lt;audit path&gt;.rotation.json`. It
   contains a format version, opaque transaction ID, configured backup count,
-  and operation `rotate`. The manifest is encoded as compact UTF-8 JSON,
+  operation `rotate`, a phase (`staging` or `installing`), and the occupied
+  source slots captured before rotation. The manifest is encoded as compact UTF-8 JSON,
   written to a temporary sibling, synced, atomically renamed, and followed by
   a parent-directory sync before any managed file is renamed.
 - For transaction ID `T`, staging names are exactly
