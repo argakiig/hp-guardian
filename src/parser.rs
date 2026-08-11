@@ -12,57 +12,60 @@ impl PolicyParser {
     pub fn parse(yaml_str: &str) -> Result<Engine, PolicyError> {
         let policy: serde_yaml::Value =
             serde_yaml::from_str(yaml_str).map_err(PolicyError::InvalidYaml)?;
-        let fields = mapping(&policy, "policy")?;
-        let mut default_action = Action::Allow;
-        let mut rules = Vec::new();
-        let mut rule_ids = BTreeSet::new();
-        let mut index = 0;
-        let mut version_seen = false;
-
-        for (field, value) in fields {
-            let field = field_name(field, "top-level")?;
-            match field {
-                "version" => {
-                    version_seen = true;
-                    validate_version(value)?;
-                }
-                "global" => default_action = parse_global(value)?,
-                "rules" => add_rules(
-                    &mut rules,
-                    value,
-                    BTreeMap::new(),
-                    &mut rule_ids,
-                    &mut index,
-                )?,
-                "agents" => add_agents(&mut rules, value, &mut rule_ids, &mut index)?,
-                _ => {
-                    return Err(PolicyError::InvalidField {
-                        field: field.to_owned(),
-                    });
-                }
-            }
+        match declared_version(&policy)? {
+            SUPPORTED_VERSION => parse_v1(&policy),
+            version => Err(PolicyError::UnsupportedVersion {
+                version: Some(version.to_string()),
+            }),
         }
-
-        if !version_seen {
-            return Err(PolicyError::UnsupportedVersion { version: None });
-        }
-
-        Ok(Engine::with_default_action(rules, default_action))
     }
 }
 
-fn validate_version(value: &serde_yaml::Value) -> Result<(), PolicyError> {
-    let version = value.as_i64();
-    if version == Some(SUPPORTED_VERSION) {
-        return Ok(());
-    }
+fn declared_version(policy: &serde_yaml::Value) -> Result<i64, PolicyError> {
+    let fields = mapping(policy, "policy")?;
+    let version_value = fields
+        .iter()
+        .find_map(|(field, value)| (field.as_str() == Some("version")).then_some(value))
+        .ok_or(PolicyError::UnsupportedVersion { version: None })?;
 
-    Err(PolicyError::UnsupportedVersion {
-        version: value
+    let version = version_value.as_i64();
+    version.ok_or_else(|| PolicyError::UnsupportedVersion {
+        version: version_value
             .as_str()
             .map(str::to_owned)
             .or_else(|| version.map(|value| value.to_string())),
     })
+}
+
+fn parse_v1(policy: &serde_yaml::Value) -> Result<Engine, PolicyError> {
+    let fields = mapping(policy, "policy")?;
+    let mut default_action = Action::Allow;
+    let mut rules = Vec::new();
+    let mut rule_ids = BTreeSet::new();
+    let mut index = 0;
+
+    for (field, value) in fields {
+        let field = field_name(field, "top-level")?;
+        match field {
+            "version" => {}
+            "global" => default_action = parse_global(value)?,
+            "rules" => add_rules(
+                &mut rules,
+                value,
+                BTreeMap::new(),
+                &mut rule_ids,
+                &mut index,
+            )?,
+            "agents" => add_agents(&mut rules, value, &mut rule_ids, &mut index)?,
+            _ => {
+                return Err(PolicyError::InvalidField {
+                    field: field.to_owned(),
+                });
+            }
+        }
+    }
+
+    Ok(Engine::with_default_action(rules, default_action))
 }
 
 fn parse_global(value: &serde_yaml::Value) -> Result<Action, PolicyError> {

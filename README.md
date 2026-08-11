@@ -1,27 +1,28 @@
 # Hardpoint Guardian
 
 Hardpoint Guardian is a declarative policy engine for agentic tool calls. It
-ships two native runtimes with one shared contract:
+provides two native runtimes that implement a shared policy contract:
 
 - Python for Python agents: `src/hp_guard/`
 - Rust for Rust agents: `src/*.rs`
 
 Neither runtime is the reference implementation. [Policy Language v1](spec/policy-language-v1.md)
-and the executable [conformance cases](conformance/README.md) define behavior.
+and the executable [conformance cases](conformance/README.md) define the
+normative behavior.
 
-## What v1 does
+## v1 capabilities
 
-- Strictly validates policy YAML and rejects unknown enforcement fields.
-- Applies `allow`, `deny`, `throttle`, `log`, `require_approval`, and `redirect`
-  decisions with deterministic precedence.
-- Supports `args_match`, lexical `path_pattern`, and agent/tool/user/context
-  targets.
-- Returns the selected action and every matching rule index.
+- Validates policy YAML strictly and rejects unknown enforcement fields.
+- Resolves `allow`, `deny`, `throttle`, `log`, `require_approval`, and
+  `redirect` decisions using deterministic precedence.
+- Supports `args_match`, lexical `path_pattern`, and agent, tool, user, and
+  context targets.
+- Returns the selected action and the index of every matching rule.
 - Produces typed audit records that serialize to natural JSON values.
 
-v1 is stateless. Rate limits, redirect execution, multi-action rules, memory
-rules, scripting, and boolean condition combinators are intentionally rejected
-until both runtimes support them.
+v1 is stateless. It rejects rate limits, redirect execution, multi-action
+rules, memory rules, scripting, and boolean condition combinators until both
+runtimes support them.
 
 ## Policy example
 
@@ -42,11 +43,11 @@ agents:
 ```
 
 `path_pattern` is lexical: it does not canonicalize paths or enforce a
-filesystem sandbox. `args_match` uses a small language-native matcher shared
-by both runtimes; groups, character classes, look-arounds, and backreferences
-are rejected.
+filesystem sandbox. `args_match` uses a small, language-native pattern matcher
+shared by both runtimes. Groups, character classes, look-arounds, and
+backreferences are rejected.
 Ambiguous YAML scalar-looking identifiers such as `yes`, `2026-08-11`, or
-`012` are rejected to keep both loaders deterministic.
+`012` are rejected so that both loaders behave deterministically.
 
 ## Python
 
@@ -76,8 +77,8 @@ decision = engine.resolve_call(PolicyCall(tool="shell", args=["rm", "-rf", "/tmp
 assert decision.action.value == "deny"
 ```
 
-Run the test suite through `uv`; it supplies the Python dependencies without
-requiring a global installation:
+Run the Python test suite through `uv`, which provides the required
+dependencies without a global installation:
 
 ```bash
 PYTHONPATH=src uv run --with pyyaml --with pytest python -m pytest tests
@@ -98,8 +99,9 @@ let decision = engine.resolve_call(&PolicyCall::default());
 assert_eq!(decision.action.as_str(), "deny");
 ```
 
-`PolicyParser::parse` returns `Result<Engine, PolicyError>`; use
-`PolicyError::code()` when a caller needs a stable language-neutral error code.
+`PolicyParser::parse` returns `Result<Engine, PolicyError>`. Use
+`PolicyError::code()` when a caller requires a stable, language-neutral error
+code.
 
 ## Verification
 
@@ -108,8 +110,8 @@ make test     # Python suite, Rust suite, and shared fixture runners
 make check    # test plus Rust format, lint, and build checks
 ```
 
-The shared cases in `conformance/cases/` are a release gate: a policy semantic
-changes only after both runtimes pass its new fixture.
+The shared cases in `conformance/cases/` are a release gate. A policy semantic
+may change only after both runtimes pass the corresponding new fixture.
 
 ## Development contract
 

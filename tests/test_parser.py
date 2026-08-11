@@ -2,6 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import pytest
+import hp_guard.parser as parser_module
 from hp_guard.parser import PolicyParser
 from hp_guard.models import PolicyCall, PolicyError
 
@@ -47,6 +48,22 @@ def test_parse_policy_with_global_default():
     call = PolicyCall(agent="research-bot", tool="read_file", args=["test.txt"])
     decision = engine.resolve_call(call)
     assert decision.action.value == "allow"
+
+
+def test_parse_routes_a_loaded_v1_mapping_to_the_v1_parser(monkeypatch):
+    parsed_policy = {"version": 1, "global": {"default_action": "deny"}}
+    expected_engine = object()
+    loads = []
+
+    def load_policy(*args, **kwargs):
+        loads.append((args, kwargs))
+        return parsed_policy
+
+    monkeypatch.setattr(parser_module.yaml, "load", load_policy)
+    monkeypatch.setattr(parser_module, "_parse_v1", lambda policy: expected_engine)
+
+    assert PolicyParser.parse("version: 1") is expected_engine
+    assert loads == [(("version: 1",), {"Loader": parser_module._Yaml12SafeLoader})]
 
 
 @pytest.mark.parametrize(

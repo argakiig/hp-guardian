@@ -57,28 +57,33 @@ class PolicyParser:
             raise PolicyError("invalid_yaml", f"invalid YAML policy: {error}") from error
 
         policy = _mapping(policy, "policy")
-        _reject_unknown_fields(policy, {"version", "global", "rules", "agents"}, "policy")
         version = policy.get("version")
         if type(version) is not int or version != 1:
             raise PolicyError("unsupported_version", "policy version must be the integer 1")
 
-        rules: list[Rule] = []
-        seen_ids: set[str] = set()
-        default_action = Action.ALLOW
-        for field, value in policy.items():
-            if field == "version":
-                continue
-            if field == "global":
-                global_config = _mapping(value, "global")
-                _reject_unknown_fields(global_config, {"default_action"}, "global")
-                if "default_action" in global_config:
-                    default_action = _parse_action(global_config["default_action"])
-            elif field == "rules":
-                _add_rules(value, {}, rules, seen_ids)
-            elif field == "agents":
-                _add_agents(value, rules, seen_ids)
+        return _parse_v1(policy)
 
-        return Engine(rules=rules, default_action=default_action)
+
+def _parse_v1(policy: Mapping[Any, Any]) -> Engine:
+    _reject_unknown_fields(policy, {"version", "global", "rules", "agents"}, "policy")
+
+    rules: list[Rule] = []
+    seen_ids: set[str] = set()
+    default_action = Action.ALLOW
+    for field, value in policy.items():
+        if field == "version":
+            continue
+        if field == "global":
+            global_config = _mapping(value, "global")
+            _reject_unknown_fields(global_config, {"default_action"}, "global")
+            if "default_action" in global_config:
+                default_action = _parse_action(global_config["default_action"])
+        elif field == "rules":
+            _add_rules(value, {}, rules, seen_ids)
+        elif field == "agents":
+            _add_agents(value, rules, seen_ids)
+
+    return Engine(rules=rules, default_action=default_action)
 
 
 def _add_agents(agents: Any, rules: list[Rule], seen_ids: set[str]) -> None:

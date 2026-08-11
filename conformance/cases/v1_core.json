@@ -6,6 +6,30 @@
     "expect": {"decision": "deny", "matched_rules": []}
   },
   {
+    "name": "missing version is rejected",
+    "policy": "global:\n  default_action: allow\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "unsupported_version"
+  },
+  {
+    "name": "non-integer version is rejected",
+    "policy": "version: '1'\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "unsupported_version"
+  },
+  {
+    "name": "future version is rejected",
+    "policy": "version: 2\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "unsupported_version"
+  },
+  {
+    "name": "v2-only field is rejected by v1",
+    "policy": "version: 1\neffects:\n  audit: required\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_field"
+  },
+  {
     "name": "path and context deny match together",
     "policy": "version: 1\nagents:\n  writer:\n    tools:\n      write_file:\n        rules:\n          - action: deny\n            target:\n              context:\n                phase: prompt\n            condition:\n              path_pattern: /etc/*\n",
     "call": {"agent": "writer", "tool": "write_file", "args": ["/etc/passwd"], "context": {"phase": "prompt"}},
