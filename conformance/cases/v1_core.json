@@ -1,0 +1,32 @@
+[
+  {
+    "name": "default deny applies to an unknown call",
+    "policy": "version: 1\nglobal:\n  default_action: deny\n",
+    "call": {"agent": "unknown", "tool": "unknown", "args": [], "context": {}},
+    "expect": {"decision": "deny", "matched_rules": []}
+  },
+  {
+    "name": "path and context deny match together",
+    "policy": "version: 1\nagents:\n  writer:\n    tools:\n      write_file:\n        rules:\n          - action: deny\n            target:\n              context:\n                phase: prompt\n            condition:\n              path_pattern: /etc/*\n",
+    "call": {"agent": "writer", "tool": "write_file", "args": ["/etc/passwd"], "context": {"phase": "prompt"}},
+    "expect": {"decision": "deny", "matched_rules": [0]}
+  },
+  {
+    "name": "global deny overrides a specific allow",
+    "policy": "version: 1\nrules:\n  - action: deny\nagents:\n  bot:\n    tools:\n      curl:\n        rules:\n          - action: allow\n",
+    "call": {"agent": "bot", "tool": "curl", "args": [], "context": {}},
+    "expect": {"decision": "deny", "matched_rules": [0, 1]}
+  },
+  {
+    "name": "unknown policy field is rejected",
+    "policy": "version: 1\nglobal:\n  default_actoin: deny\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_field"
+  },
+  {
+    "name": "invalid regex is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: \"[\"\n",
+    "call": {"args": [], "context": {}},
+    "expect_error": "invalid_regex"
+  }
+]
