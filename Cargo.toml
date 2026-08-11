@@ -3,6 +3,7 @@ name = "hp-guard"
 version = "0.1.0"
 edition = "2021"
 description = "Declarative policy engine for agentic guardrails and enforcement"
+license = "Apache-2.0"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,13 @@
+# Rust build output
+/target/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.venv/
+
+# Local durable-audit output
+/audit.jsonl
+/audit.jsonl.*
+/var/hp-guard/

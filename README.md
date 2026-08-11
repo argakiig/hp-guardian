@@ -1,114 +1,192 @@
 # Hardpoint Guardian
 
-Hardpoint Guardian is a declarative policy engine for agentic tool calls. It
-provides two native runtimes that implement a shared policy contract:
+Hardpoint Guardian is a source-first, dual-runtime policy engine for agentic
+tool calls. It evaluates a declarative YAML policy before a host application
+performs an effect. Python and Rust implement the same policy contract; neither
+runtime is the reference implementation.
 
-- Python for Python agents: `src/hp_guard/`
-- Rust for Rust agents: `src/*.rs`
+This v0.1 repository is ready to integrate from source. It does not publish a
+Python package or a Rust crate, run a hosted service, or execute tools on a
+host's behalf.
 
-Neither runtime is the reference implementation. [Policy Language v1](spec/policy-language-v1.md)
-and the executable [conformance cases](conformance/README.md) define the
-normative behavior.
+## What it provides
 
-## v1 capabilities
+- Strict YAML policy validation and deterministic decision resolution.
+- Native Python and Rust runtimes checked against shared conformance fixtures.
+- Bounded boolean conditions and absolute UTC time windows.
+- A JSON Lines simulator for replaying a trace against one or two policies.
+- Host-local, durable JSON Lines authorization auditing with explicit policy
+  reloads and bounded rotation.
+- An inline enforcement adapter that returns data for an allowed host effect;
+  it never calls the tool itself.
 
-- Validates policy YAML strictly and rejects unknown enforcement fields.
-- Resolves `allow`, `deny`, `throttle`, `log`, `require_approval`, and
-  `redirect` decisions using deterministic precedence.
-- Supports `args_match`, lexical `path_pattern`, and agent, tool, user, and
-  context targets.
-- Returns the selected action and the index of every matching rule.
-- Produces typed audit records that serialize to natural JSON values.
+The normative contract is [Policy Language v1](spec/policy-language-v1.md).
+The executable [conformance cases](conformance/README.md) are the cross-runtime
+release gate.
 
-v1 is stateless. It rejects rate limits, redirect execution, multi-action
-rules, memory rules, scripting, and boolean condition combinators until both
-runtimes support them.
+## Prerequisites
 
-## Policy example
+- Git
+- [uv](https://docs.astral.sh/uv/) and Python 3.10 or later
+- A current stable [Rust toolchain](https://www.rust-lang.org/tools/install)
+- `make`
 
-```yaml
-version: 1
-global:
-  default_action: allow
+All commands below run from the repository root.
 
-agents:
-  research-bot:
-    tools:
-      write_file:
-        rules:
-          - id: deny-system-writes
-            action: deny
-            condition:
-              path_pattern: /etc/*
+## Quick start
+
+Clone the repository, then run the complete local release gate:
+
+```bash
+git clone <repository-url> hp-guard
+cd hp-guard
+make check
 ```
 
-`path_pattern` is lexical: it does not canonicalize paths or enforce a
-filesystem sandbox. `args_match` uses a small, language-native pattern matcher
-shared by both runtimes. Groups, character classes, look-arounds, and
-backreferences are rejected.
-Ambiguous YAML scalar-looking identifiers such as `yes`, `2026-08-11`, or
-`012` are rejected so that both loaders behave deterministically.
+`make check` runs the Python and Rust test suites, shared conformance runners,
+Rust formatting, Clippy with warnings denied, and a Rust build.
 
-## Python
+Evaluate a policy directly in Python:
 
-Run from the repository root:
-
-```python
-from hp_guard.models import PolicyCall, PolicyError
-from hp_guard.parser import PolicyParser
+```bash
+PYTHONPATH=src uv run --with pyyaml python - <<'PY'
+from hp_guard import PolicyCall, PolicyParser
 
 policy = """
 version: 1
 rules:
-  - action: deny
-    target:
-      tool: shell
-    condition:
-      args_match: "^rm .*"
+  - id: deny-shell-removal
+    action: deny
+    target: {tool: shell}
+    condition: {args_match: "^rm .*"}
 """
 
-try:
-    engine = PolicyParser.parse(policy)
-except PolicyError as error:
-    print(error.code)
-    raise
-
-decision = engine.resolve_call(PolicyCall(tool="shell", args=["rm", "-rf", "/tmp/x"]))
-assert decision.action.value == "deny"
+engine = PolicyParser.parse(policy)
+decision = engine.resolve_call(PolicyCall(tool="shell", args=["rm", "-rf", "/tmp/demo"]))
+print(decision.action.value)  # deny
+PY
 ```
 
-Run the Python test suite through `uv`, which provides the required
-dependencies without a global installation:
+Use the Rust runtime from another local workspace with a path dependency until
+crate publication is approved:
 
-```bash
-PYTHONPATH=src uv run --with pyyaml --with pytest python -m pytest tests
+```toml
+[dependencies]
+hp-guard = { path = "../hp-guard" }
 ```
-
-## Rust
 
 ```rust
 use hp_guard::{PolicyCall, PolicyParser};
 
 let policy = r#"
 version: 1
-global:
-  default_action: deny
+global: {default_action: deny}
 "#;
 let engine = PolicyParser::parse(policy)?;
 let decision = engine.resolve_call(&PolicyCall::default());
 assert_eq!(decision.action.as_str(), "deny");
 ```
 
-`PolicyParser::parse` returns `Result<Engine, PolicyError>`. Use
-`PolicyError::code()` when a caller requires a stable, language-neutral error
-code.
+## Write a policy
 
-## Offline policy simulation
+Policies require `version: 1`. A policy may have top-level rules and nested
+agent/tool rules. All unknown enforcement fields are rejected.
 
-The simulator replays JSON Lines tool-call traces without executing tools,
-writing audit records, or mutating policy state. It accepts one baseline policy
-and an optional candidate policy, then emits one JSON Lines report per trace
-event. Reports omit raw arguments and context.
+```yaml
+version: 1
+global:
+  default_action: deny
+
+rules:
+  - id: allow-research-read
+    action: allow
+    target:
+      agent: research-bot
+      tool: read_file
+    condition:
+      all:
+        - path_pattern: "/workspace/*"
+        - not:
+            path_pattern: "/workspace/.env"
+
+  - id: release-window-only
+    action: allow
+    target:
+      tool: deploy
+    condition:
+      time_window:
+        start: "2026-08-11T09:00:00Z"
+        end: "2026-08-11T17:00:00Z"
+```
+
+Supported actions are `allow`, `deny`, `throttle`, `log`,
+`require_approval`, and `redirect`. Matching `deny` rules win; otherwise
+specificity, action priority, and declaration order resolve ties
+deterministically.
+
+Conditions can use `args_match`, lexical `path_pattern`, `time_window`, and
+bounded `all`, `any`, and `not` composition. A time window is UTC and matches
+`start <= now < end`. `path_pattern` is lexical: it does not canonicalize a
+path, resolve symlinks, or sandbox filesystem access. `args_match` uses the
+portable pattern grammar defined in the policy specification, not a host regex
+engine.
+
+## Integrate enforcement
+
+The inline adapter is the intended host boundary. It validates the complete
+request, rejects an expired deadline, writes the required authorization record,
+then returns an effect only for an `allow` decision. The host chooses whether
+and how to execute that effect.
+
+```python
+import time
+
+from hp_guard import (
+    AuditLog,
+    AuditedPolicyStore,
+    EnforcementRequest,
+    InlineEnforcementAdapter,
+    PolicyCall,
+)
+
+policy_text = """
+version: 1
+global: {default_action: allow}
+"""
+store = AuditedPolicyStore(policy_text, AuditLog("var/hp-guard/audit.jsonl"))
+adapter = InlineEnforcementAdapter(store)
+
+request = EnforcementRequest(
+    caller_id="my-host",
+    correlation_id="request-42",  # preserve this value when retrying
+    deadline_unix_ms=time.time_ns() // 1_000_000 + 5_000,
+    call=PolicyCall(tool="read_file", args=["README.md"]),
+)
+response = adapter.authorize(request)
+
+if response.effect is not None:
+    # The host owns execution. Hardpoint Guardian has no executor callback.
+    host_execute(response.effect)
+else:
+    handle_terminal_policy_decision(response.decision)
+```
+
+Every adapter request needs a non-empty caller ID, retry-stable correlation ID,
+and absolute Unix-millisecond deadline. Audit failure is fail-closed: the
+adapter returns no effect. Authorization records omit raw arguments and context
+by default; the initial audit design relies on local filesystem permissions,
+not encryption at rest or signed policy artifacts.
+
+See [Inline Enforcement Adapter](spec/2026-08-11-inline-enforcement-adapter.md)
+and [Durable Audit and Explicit Policy Lifecycle](spec/2026-08-11-durable-audit-and-policy-lifecycle.md)
+for the complete boundary and error contracts.
+
+## Simulate a policy change
+
+The simulator replays JSON Lines traces without executing tools, writing audit
+records, or mutating policy state. Give it a baseline policy and optionally a
+candidate policy; it emits one JSON Lines report per input event and omits raw
+arguments and context from reports.
 
 ```bash
 PYTHONPATH=src uv run --with pyyaml python -m hp_guard.simulate \
@@ -118,35 +196,49 @@ cargo run --bin hp-guard-simulate -- \
   --policy baseline.yaml --trace calls.jsonl --compare candidate.yaml
 ```
 
-Trace events require `version: 1`, consecutive positive `sequence` values, and
-a normalized `call` object. The complete format, stable errors, and shared
-examples are defined in [Policy Simulator and Trace Format](spec/2026-08-11-policy-simulator-and-trace-format.md).
+Each trace event requires `version: 1`, a consecutive positive `sequence`, and
+a normalized `call`. The full JSONL format and stable trace errors are in
+[Policy Simulator and Trace Format](spec/2026-08-11-policy-simulator-and-trace-format.md).
 
-## Inline enforcement
+## Supported scope and limitations
 
-The inline adapter validates a host request, rejects an expired deadline,
-writes the required authorization audit record, and returns data for the host
-to execute. It never invokes a tool itself. Only an `allow` response contains
-an effect; every other policy decision is terminal for this release.
+Hardpoint Guardian is an authorization decision component, not a complete
+security perimeter.
 
-Requests require a caller ID, a retry-stable correlation ID, a Unix-millisecond
-deadline, and a normalized policy call. The complete API and error contract are
-defined in [Inline Enforcement Adapter](spec/2026-08-11-inline-enforcement-adapter.md).
+- It does not sandbox a process, canonicalize filesystem paths, or protect a
+  tool that bypasses the integration boundary.
+- The adapter never executes effects. A host must execute an allowed effect and
+  define host-side handling for `throttle`, `log`, `require_approval`, and
+  `redirect` decisions.
+- v0.1 is stateless: it does not enforce rate limits, perform redirect
+  execution, combine multiple actions, retain policy memory, or run scripts.
+- It has no proxy/sidecar transport, remote audit storage, encryption/key
+  management, signed policies, automatic policy watching, telemetry, or hosted
+  service.
+- The source contract is version 1 only. Future language versions require a
+  separate parser dispatch and conformance fixture.
 
-## Verification
+The deferred capability roadmap is maintained in
+[Deferred Capabilities Roadmap](plans/2026-08-11_150000-deferred-capabilities-roadmap.md).
+
+## Verification and development
 
 ```bash
-make test     # Python suite, Rust suite, and shared fixture runners
-make check    # test plus Rust format, lint, and build checks
+make test    # Python, Rust, and shared conformance tests
+make check   # test plus format, Clippy, and build
 ```
 
-The shared cases in `conformance/cases/` are a release gate. A policy semantic
-may change only after both runtimes pass the corresponding new fixture.
+Public behavior changes follow this order:
 
-## Development contract
+1. Update the normative specification.
+2. Add a shared conformance case.
+3. Implement and test both runtimes.
+4. Run `make check`.
 
-1. Change [Policy Language v1](spec/policy-language-v1.md) before changing a
-   public behavior.
-2. Add a shared conformance case first.
-3. Implement and test it in both runtimes.
-4. Run `make check` before merging.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and contribution guidance,
+[SECURITY.md](SECURITY.md) for private vulnerability reporting, and
+[CHANGELOG.md](CHANGELOG.md) for v0.1 release notes.
+
+## License
+
+Hardpoint Guardian is licensed under [Apache-2.0](LICENSE).
