@@ -74,6 +74,28 @@ fn serializes_shared_fixture_responses_and_only_allows_effects() {
 }
 
 #[test]
+fn adapter_audit_matches_the_returned_policy_identity_and_decision() {
+    let fixture = fixture();
+    let path = audit_path("response-audit-identity");
+    let mut adapter = adapter(fixture["policy"].as_str().expect("policy"), &path);
+    let request = EnforcementRequest::from_value(&fixture["requests"][0]).expect("request");
+
+    let response = adapter.authorize(request).expect("authorized response");
+
+    let audit_records = records(&path);
+    let record = audit_records.last().expect("authorization record");
+    assert_eq!(record["event"], "authorization");
+    assert_eq!(record["correlation_id"], response.correlation_id);
+    assert_eq!(record["policy_version"], response.policy.version);
+    assert_eq!(record["policy_digest"], response.policy.sha256);
+    assert_eq!(record["decision"], serde_json::json!(response.decision));
+    assert_eq!(
+        record["matched_rules"],
+        serde_json::json!(response.matched_rules)
+    );
+}
+
+#[test]
 fn rejects_expired_and_invalid_requests_before_writing_authorization() {
     let fixture = fixture();
     let path = audit_path("validation");

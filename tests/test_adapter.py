@@ -186,6 +186,21 @@ def test_authorization_audit_includes_metadata_but_not_raw_call_input(tmp_path):
     assert '"context"' not in text
 
 
+def test_adapter_audit_matches_the_returned_policy_identity_and_decision(tmp_path):
+    fixture = _fixture()
+    adapter, audit_path = _adapter(tmp_path, now_unix_ms=fixture["now_unix_ms"])
+
+    response = adapter.authorize(EnforcementRequest.from_dict(fixture["requests"][0]))
+
+    record = _records(audit_path)[-1]
+    assert record["event"] == "authorization"
+    assert record["correlation_id"] == response.correlation_id
+    assert record["policy_version"] == response.policy.version
+    assert record["policy_digest"] == response.policy.digest
+    assert record["decision"] == response.decision
+    assert record["matched_rules"] == list(response.matched_rules)
+
+
 def test_reused_correlation_id_is_audited_as_two_separate_attempts(tmp_path):
     fixture = _fixture()
     adapter, audit_path = _adapter(tmp_path)

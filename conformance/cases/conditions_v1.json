@@ -110,6 +110,19 @@
     }
   },
   {
+    "name": "not negates a time window",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      not:\n        time_window:\n          start: \"2026-08-11T12:00:00Z\"\n          end: \"2026-08-11T13:00:00Z\"\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "allow",
+      "matched_rules": []
+    }
+  },
+  {
     "name": "time window composes with existing leaves",
     "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: \"^rm .*\"\n      time_window:\n        start: \"2026-08-11T12:00:00Z\"\n        end: \"2026-08-11T13:00:00Z\"\n",
     "call": {
