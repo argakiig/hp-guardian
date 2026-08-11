@@ -18,8 +18,8 @@
     "expect_error": "unsupported_version"
   },
   {
-    "name": "future version is rejected",
-    "policy": "version: 2\n",
+    "name": "unsupported future version is rejected",
+    "policy": "version: 3\n",
     "call": {"args": [], "context": {}},
     "expect_error": "unsupported_version"
   },

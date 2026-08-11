@@ -1,4 +1,4 @@
-from hp_guard.models import AuditEntry, Rule, Action, PolicyCall, PolicyError
+from hp_guard.models import AuditEntry, RateLimit, Rule, Action, PolicyCall, PolicyError
 from hp_guard.engine import Engine, Decision
 from hp_guard.logging import AuditLogger
 from hp_guard.parser import PolicyParser
@@ -18,6 +18,7 @@ from hp_guard.adapter import (
     EnforcementResponse,
     InlineEnforcementAdapter,
 )
+from hp_guard.state import InMemoryRateLimitStore, RateLimitedPolicyStore, StateError
 
 __all__ = (
     "Action",
@@ -31,6 +32,7 @@ __all__ = (
     "EnforcementRequest",
     "EnforcementResponse",
     "InlineEnforcementAdapter",
+    "InMemoryRateLimitStore",
     "Authorization",
     "Decision",
     "Engine",
@@ -38,9 +40,12 @@ __all__ = (
     "PolicyError",
     "PolicyParser",
     "PolicySnapshot",
+    "RateLimit",
+    "RateLimitedPolicyStore",
     "Rule",
     "SimulationPolicy",
     "SimulationReport",
+    "StateError",
     "TraceError",
     "OutcomeStatus",
     "simulate_trace",

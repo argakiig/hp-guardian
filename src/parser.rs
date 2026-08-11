@@ -1,10 +1,9 @@
 use crate::conditions::validate_args_match as validate_portable_args_match;
-use crate::models::{Action, Condition, PolicyError, Rule, TimeWindow};
+use crate::models::{Action, Condition, PolicyError, RateLimit, Rule, TimeWindow};
 use crate::Engine;
 use chrono::{DateTime, Utc};
 use std::collections::{BTreeMap, BTreeSet};
 
-const SUPPORTED_VERSION: i64 = 1;
 const MAX_CONDITION_DEPTH: usize = 32;
 const MAX_CONDITION_NODES: usize = 128;
 
@@ -16,7 +15,18 @@ impl PolicyParser {
         let policy: serde_yaml::Value =
             serde_yaml::from_str(yaml_str).map_err(PolicyError::InvalidYaml)?;
         match declared_version(&policy)? {
-            SUPPORTED_VERSION => parse_v1(&policy),
+            1 => parse_v1(&policy),
+            version => Err(PolicyError::UnsupportedVersion {
+                version: Some(version.to_string()),
+            }),
+        }
+    }
+
+    pub(crate) fn parse_rate_limited(yaml_str: &str) -> Result<Engine, PolicyError> {
+        let policy: serde_yaml::Value =
+            serde_yaml::from_str(yaml_str).map_err(PolicyError::InvalidYaml)?;
+        match declared_version(&policy)? {
+            2 => parse_v2(&policy),
             version => Err(PolicyError::UnsupportedVersion {
                 version: Some(version.to_string()),
             }),
@@ -41,9 +51,22 @@ fn declared_version(policy: &serde_yaml::Value) -> Result<i64, PolicyError> {
 }
 
 fn parse_v1(policy: &serde_yaml::Value) -> Result<Engine, PolicyError> {
+    parse_version(policy, 1, false)
+}
+
+fn parse_v2(policy: &serde_yaml::Value) -> Result<Engine, PolicyError> {
+    parse_version(policy, 2, true)
+}
+
+fn parse_version(
+    policy: &serde_yaml::Value,
+    version: i64,
+    allow_rate_limit: bool,
+) -> Result<Engine, PolicyError> {
     let fields = mapping(policy, "policy")?;
     let mut default_action = Action::Allow;
     let mut rules = Vec::new();
+    let mut rate_limits = BTreeMap::new();
     let mut rule_ids = BTreeSet::new();
     let mut index = 0;
 
@@ -58,8 +81,17 @@ fn parse_v1(policy: &serde_yaml::Value) -> Result<Engine, PolicyError> {
                 BTreeMap::new(),
                 &mut rule_ids,
                 &mut index,
+                &mut rate_limits,
+                allow_rate_limit,
             )?,
-            "agents" => add_agents(&mut rules, value, &mut rule_ids, &mut index)?,
+            "agents" => add_agents(
+                &mut rules,
+                value,
+                &mut rule_ids,
+                &mut index,
+                &mut rate_limits,
+                allow_rate_limit,
+            )?,
             _ => {
                 return Err(PolicyError::InvalidField {
                     field: field.to_owned(),
@@ -68,7 +100,12 @@ fn parse_v1(policy: &serde_yaml::Value) -> Result<Engine, PolicyError> {
         }
     }
 
-    Ok(Engine::with_default_action(rules, default_action))
+    Ok(Engine::with_version(
+        rules,
+        default_action,
+        version,
+        rate_limits,
+    ))
 }
 
 fn parse_global(value: &serde_yaml::Value) -> Result<Action, PolicyError> {
@@ -100,6 +137,8 @@ fn add_agents(
     agents: &serde_yaml::Value,
     rule_ids: &mut BTreeSet<String>,
     index: &mut usize,
+    rate_limits: &mut BTreeMap<usize, RateLimit>,
+    allow_rate_limit: bool,
 ) -> Result<(), PolicyError> {
     for (agent_name, agent_value) in mapping(agents, "agents")? {
         let agent_name = field_name(agent_name, "agent")?;
@@ -144,7 +183,15 @@ fn add_agents(
                 ("tool".to_owned(), tool_name.to_owned()),
             ]
             .into();
-            add_rules(rules, tool_rules, enclosing_target, rule_ids, index)?;
+            add_rules(
+                rules,
+                tool_rules,
+                enclosing_target,
+                rule_ids,
+                index,
+                rate_limits,
+                allow_rate_limit,
+            )?;
         }
     }
     Ok(())
@@ -156,6 +203,8 @@ fn add_rules(
     enclosing_target: BTreeMap<String, String>,
     rule_ids: &mut BTreeSet<String>,
     index: &mut usize,
+    rate_limits: &mut BTreeMap<usize, RateLimit>,
+    allow_rate_limit: bool,
 ) -> Result<(), PolicyError> {
     let entries = value
         .as_sequence()
@@ -163,7 +212,15 @@ fn add_rules(
             field: "rules must be a sequence".to_owned(),
         })?;
     for entry in entries {
-        add_rule(rules, entry, enclosing_target.clone(), rule_ids, index)?;
+        add_rule(
+            rules,
+            entry,
+            enclosing_target.clone(),
+            rule_ids,
+            index,
+            rate_limits,
+            allow_rate_limit,
+        )?;
     }
     Ok(())
 }
@@ -174,12 +231,15 @@ fn add_rule(
     enclosing_target: BTreeMap<String, String>,
     rule_ids: &mut BTreeSet<String>,
     index: &mut usize,
+    rate_limits: &mut BTreeMap<usize, RateLimit>,
+    allow_rate_limit: bool,
 ) -> Result<(), PolicyError> {
     let fields = mapping(value, "rule")?;
     let mut action = None;
     let mut target = None;
     let mut condition = None;
     let mut id = None;
+    let mut rate_limit = None;
 
     for (field, value) in fields {
         match field_name(field, "rule")? {
@@ -206,6 +266,7 @@ fn add_rule(
                 }
                 id = Some(value.to_owned());
             }
+            "rate_limit" if allow_rate_limit => rate_limit = Some(parse_rate_limit(value)?),
             field => {
                 return Err(PolicyError::InvalidField {
                     field: format!("rule.{field}"),
@@ -225,6 +286,12 @@ fn add_rule(
         }
     }
 
+    let action = parse_action(&action)?;
+    if rate_limit.is_some() && action != Action::Allow {
+        return Err(PolicyError::InvalidField {
+            field: "rate_limit is permitted only on an allow rule".to_owned(),
+        });
+    }
     let mut target = parse_target(target)?;
     for (key, value) in enclosing_target {
         add_enclosing_target(&mut target, &key, &value)?;
@@ -232,13 +299,51 @@ fn add_rule(
     let condition = parse_conditions(condition)?;
 
     rules.push(Rule {
-        action: parse_action(&action)?,
+        action,
         target,
         condition,
         rule_index: *index,
     });
+    if let Some(rate_limit) = rate_limit {
+        rate_limits.insert(*index, rate_limit);
+    }
     *index += 1;
     Ok(())
+}
+
+fn parse_rate_limit(value: &serde_yaml::Value) -> Result<RateLimit, PolicyError> {
+    let fields = mapping(value, "rate_limit")?;
+    if fields.len() != 2 {
+        return Err(PolicyError::InvalidField {
+            field: "rate_limit requires max_calls and window_seconds".to_owned(),
+        });
+    }
+    let mut max_calls = None;
+    let mut window_seconds = None;
+    for (field, value) in fields {
+        match field_name(field, "rate_limit")? {
+            "max_calls" => max_calls = value.as_u64(),
+            "window_seconds" => window_seconds = value.as_u64(),
+            field => {
+                return Err(PolicyError::InvalidField {
+                    field: format!("rate_limit.{field}"),
+                });
+            }
+        }
+    }
+    match (max_calls, window_seconds) {
+        (Some(max_calls), Some(window_seconds))
+            if (1..=86_400).contains(&max_calls) && (1..=86_400).contains(&window_seconds) =>
+        {
+            Ok(RateLimit {
+                max_calls,
+                window_seconds,
+            })
+        }
+        _ => Err(PolicyError::InvalidField {
+            field: "rate_limit values must be positive integers at most 86400".to_owned(),
+        }),
+    }
 }
 
 fn parse_action(action: &str) -> Result<Action, PolicyError> {

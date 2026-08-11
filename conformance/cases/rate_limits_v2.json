@@ -1,0 +1,40 @@
+{
+  "format_version": 1,
+  "cases": [
+    {
+      "name": "fixed_window_exhausts_then_resets",
+      "policy": "version: 2\nrules:\n  - action: allow\n    target:\n      agent: research\n      tool: search\n    rate_limit:\n      max_calls: 2\n      window_seconds: 60\n",
+      "steps": [
+        {"now": 10, "call": {"agent": "research", "tool": "search"}, "expect": {"decision": "allow", "matched_rules": [0]}},
+        {"now": 11, "call": {"agent": "research", "tool": "search"}, "expect": {"decision": "allow", "matched_rules": [0]}},
+        {"now": 12, "call": {"agent": "research", "tool": "search"}, "expect": {"decision": "throttle", "matched_rules": [0]}},
+        {"now": 60, "call": {"agent": "research", "tool": "search"}, "expect": {"decision": "allow", "matched_rules": [0]}}
+      ]
+    },
+    {
+      "name": "identity_keys_are_independent",
+      "policy": "version: 2\nrules:\n  - action: allow\n    target:\n      tool: search\n    rate_limit:\n      max_calls: 1\n      window_seconds: 60\n",
+      "steps": [
+        {"now": 10, "call": {"agent": "research", "tool": "search", "user": "alice"}, "expect": {"decision": "allow", "matched_rules": [0]}},
+        {"now": 10, "call": {"agent": "research", "tool": "search", "user": "bob"}, "expect": {"decision": "allow", "matched_rules": [0]}},
+        {"now": 10, "call": {"agent": "research", "tool": "search", "user": "alice"}, "expect": {"decision": "throttle", "matched_rules": [0]}}
+      ]
+    },
+    {
+      "name": "denial_and_approval_do_not_consume_quota",
+      "policy": "version: 2\nrules:\n  - action: allow\n    target:\n      tool: search\n    rate_limit:\n      max_calls: 2\n      window_seconds: 60\n  - action: deny\n    target:\n      tool: search\n      user: blocked\n  - action: require_approval\n    target:\n      tool: search\n      context:\n        review: required\n",
+      "steps": [
+        {"now": 10, "call": {"tool": "search", "user": "blocked"}, "expect": {"decision": "deny", "matched_rules": [0, 1]}},
+        {"now": 11, "call": {"tool": "search", "context": {"review": "required"}}, "expect": {"decision": "require_approval", "matched_rules": [0, 2]}},
+        {"now": 12, "call": {"tool": "search"}, "expect": {"decision": "allow", "matched_rules": [0]}},
+        {"now": 13, "call": {"tool": "search"}, "expect": {"decision": "allow", "matched_rules": [0]}},
+        {"now": 14, "call": {"tool": "search"}, "expect": {"decision": "throttle", "matched_rules": [0]}}
+      ]
+    }
+  ],
+  "error_cases": [
+    {"name": "v1_rejects_rate_limit", "entry": "policy_parser", "policy": "version: 1\nrules:\n  - action: allow\n    rate_limit:\n      max_calls: 1\n      window_seconds: 60\n", "error": "invalid_field"},
+    {"name": "v2_rejects_rate_limit_on_non_allow", "policy": "version: 2\nrules:\n  - action: throttle\n    rate_limit:\n      max_calls: 1\n      window_seconds: 60\n", "error": "invalid_field"},
+    {"name": "v2_rejects_zero_limit", "policy": "version: 2\nrules:\n  - action: allow\n    rate_limit:\n      max_calls: 0\n      window_seconds: 60\n", "error": "invalid_field"}
+  ]
+}

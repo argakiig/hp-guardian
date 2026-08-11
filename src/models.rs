@@ -114,6 +114,13 @@ pub struct Rule {
     pub rule_index: usize,
 }
 
+/// A bounded fixed-window quota attached to a v2 allow rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimit {
+    pub max_calls: u64,
+    pub window_seconds: u64,
+}
+
 /// A bounded, declarative condition tree attached to a policy rule.
 #[derive(Debug, Clone)]
 pub enum Condition {

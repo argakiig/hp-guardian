@@ -21,6 +21,12 @@ class PolicyError(Exception):
         super().__init__(message)
 
 
+@dataclass(frozen=True)
+class RateLimit:
+    max_calls: int
+    window_seconds: int
+
+
 @dataclass
 class Rule:
     action: Action

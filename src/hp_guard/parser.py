@@ -8,7 +8,7 @@ import yaml
 
 from .engine import Engine
 from .conditions import parse_time_window, validate_args_pattern
-from .models import Action, PolicyError, Rule
+from .models import Action, PolicyError, RateLimit, Rule
 
 
 _ACTIONS = {action.value: action for action in Action}
@@ -55,23 +55,45 @@ _Yaml12SafeLoader.add_implicit_resolver(
 class PolicyParser:
     @staticmethod
     def parse(yaml_str: str) -> Engine:
-        try:
-            policy = yaml.load(yaml_str, Loader=_Yaml12SafeLoader)
-        except yaml.YAMLError as error:
-            raise PolicyError("invalid_yaml", f"invalid YAML policy: {error}") from error
-
-        policy = _mapping(policy, "policy")
-        version = policy.get("version")
-        if type(version) is not int or version != 1:
+        policy, version = _load_policy(yaml_str)
+        if version != 1:
             raise PolicyError("unsupported_version", "policy version must be the integer 1")
-
         return _parse_v1(policy)
+
+    @staticmethod
+    def parse_rate_limited(yaml_str: str) -> Engine:
+        policy, version = _load_policy(yaml_str)
+        if version != 2:
+            raise PolicyError("unsupported_version", "rate-limited policy version must be the integer 2")
+        return _parse_v2(policy)
+
+
+def _load_policy(yaml_str: str) -> tuple[Mapping[Any, Any], int]:
+    try:
+        policy = yaml.load(yaml_str, Loader=_Yaml12SafeLoader)
+    except yaml.YAMLError as error:
+        raise PolicyError("invalid_yaml", f"invalid YAML policy: {error}") from error
+
+    policy = _mapping(policy, "policy")
+    version = policy.get("version")
+    if type(version) is not int:
+        raise PolicyError("unsupported_version", "policy version must be an integer")
+    return policy, version
 
 
 def _parse_v1(policy: Mapping[Any, Any]) -> Engine:
+    return _parse_version(policy, version=1, allow_rate_limit=False)
+
+
+def _parse_v2(policy: Mapping[Any, Any]) -> Engine:
+    return _parse_version(policy, version=2, allow_rate_limit=True)
+
+
+def _parse_version(policy: Mapping[Any, Any], *, version: int, allow_rate_limit: bool) -> Engine:
     _reject_unknown_fields(policy, {"version", "global", "rules", "agents"}, "policy")
 
     rules: list[Rule] = []
+    rate_limits: dict[int, RateLimit] = {}
     seen_ids: set[str] = set()
     default_action = Action.ALLOW
     for field, value in policy.items():
@@ -83,14 +105,20 @@ def _parse_v1(policy: Mapping[Any, Any]) -> Engine:
             if "default_action" in global_config:
                 default_action = _parse_action(global_config["default_action"])
         elif field == "rules":
-            _add_rules(value, {}, rules, seen_ids)
+            _add_rules(value, {}, rules, seen_ids, rate_limits, allow_rate_limit)
         elif field == "agents":
-            _add_agents(value, rules, seen_ids)
+            _add_agents(value, rules, seen_ids, rate_limits, allow_rate_limit)
 
-    return Engine(rules=rules, default_action=default_action)
+    return Engine(rules=rules, default_action=default_action, version=version, rate_limits=rate_limits)
 
 
-def _add_agents(agents: Any, rules: list[Rule], seen_ids: set[str]) -> None:
+def _add_agents(
+    agents: Any,
+    rules: list[Rule],
+    seen_ids: set[str],
+    rate_limits: dict[int, RateLimit],
+    allow_rate_limit: bool,
+) -> None:
     agents = _mapping(agents, "agents")
     for agent_name, agent_config in agents.items():
         agent_name = _string(agent_name, "agent name", "invalid_field")
@@ -110,6 +138,8 @@ def _add_agents(agents: Any, rules: list[Rule], seen_ids: set[str]) -> None:
                 {"agent": agent_name, "tool": tool_name},
                 rules,
                 seen_ids,
+                rate_limits,
+                allow_rate_limit,
             )
 
 
@@ -118,12 +148,16 @@ def _add_rules(
     enclosing_target: dict[str, str],
     rules: list[Rule],
     seen_ids: set[str],
+    rate_limits: dict[int, RateLimit],
+    allow_rate_limit: bool,
 ) -> None:
     if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence):
         raise PolicyError("invalid_field", "rules must be a sequence")
     for entry in entries:
         rule = _mapping(entry, "rule")
-        _reject_unknown_fields(rule, _RULE_FIELDS, "rule")
+        _reject_unknown_fields(
+            rule, _RULE_FIELDS | ({"rate_limit"} if allow_rate_limit else set()), "rule"
+        )
         if "action" not in rule:
             raise PolicyError("invalid_action", "rule action is required")
         if "id" in rule:
@@ -138,14 +172,38 @@ def _add_rules(
                 raise PolicyError("conflicting_target", f"nested target conflicts with {key}")
             target[key] = value
         condition = _parse_condition(rule.get("condition", {}))
+        action = _parse_action(rule["action"])
+        rate_limit = _parse_rate_limit(rule["rate_limit"]) if "rate_limit" in rule else None
+        if rate_limit is not None and action is not Action.ALLOW:
+            raise PolicyError("invalid_field", "rate_limit is permitted only on an allow rule")
+        rule_index = len(rules)
         rules.append(
             Rule(
-                action=_parse_action(rule["action"]),
+                action=action,
                 target=target,
                 condition=condition,
-                rule_index=len(rules),
+                rule_index=rule_index,
             )
         )
+        if rate_limit is not None:
+            rate_limits[rule_index] = rate_limit
+
+
+def _parse_rate_limit(value: Any) -> RateLimit:
+    config = _mapping(value, "rate_limit")
+    _reject_unknown_fields(config, {"max_calls", "window_seconds"}, "rate_limit")
+    if set(config) != {"max_calls", "window_seconds"}:
+        raise PolicyError("invalid_field", "rate_limit requires max_calls and window_seconds")
+    max_calls = config["max_calls"]
+    window_seconds = config["window_seconds"]
+    if (
+        type(max_calls) is not int
+        or type(window_seconds) is not int
+        or not 1 <= max_calls <= 86_400
+        or not 1 <= window_seconds <= 86_400
+    ):
+        raise PolicyError("invalid_field", "rate_limit values must be positive integers at most 86400")
+    return RateLimit(max_calls=max_calls, window_seconds=window_seconds)
 
 
 def _parse_action(value: Any) -> Action:
