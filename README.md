@@ -14,13 +14,15 @@ host's behalf.
 - Strict YAML policy validation and deterministic decision resolution.
 - Native Python and Rust runtimes checked against shared conformance fixtures.
 - Bounded boolean conditions and absolute UTC time windows.
+- An explicit, host-local v2 fixed-window rate-limit resolver.
 - A JSON Lines simulator for replaying a trace against one or two policies.
 - Host-local, durable JSON Lines authorization auditing with explicit policy
   reloads and bounded rotation.
 - An inline enforcement adapter that returns data for an allowed host effect;
   it never calls the tool itself.
 
-The normative contract is [Policy Language v1](spec/policy-language-v1.md).
+The normative contracts are [Policy Language v1](spec/policy-language-v1.md)
+and [v2 Fixed-Window Rate Limits](spec/2026-08-11-v2-fixed-window-rate-limits.md).
 The executable [conformance cases](conformance/README.md) are the cross-runtime
 release gate.
 
@@ -89,8 +91,8 @@ assert_eq!(decision.action.as_str(), "deny");
 
 ## Write a policy
 
-Policies require `version: 1`. A policy may have top-level rules and nested
-agent/tool rules. All unknown enforcement fields are rejected.
+Version 1 policies may have top-level rules and nested agent/tool rules. All
+unknown enforcement fields are rejected.
 
 ```yaml
 version: 1
@@ -130,6 +132,34 @@ bounded `all`, `any`, and `not` composition. A time window is UTC and matches
 path, resolve symlinks, or sandbox filesystem access. `args_match` uses the
 portable pattern grammar defined in the policy specification, not a host regex
 engine.
+
+## Rate-limit a v2 policy
+
+Version 2 is intentionally available only through `RateLimitedPolicyStore`.
+It uses an in-memory, process-local fixed-window quota keyed by agent, user,
+and tool. A selected `allow` rule consumes a quota slot; exhaustion returns
+`throttle`. This is a decision only—the host does not sleep, retry, or execute
+a tool on its own.
+
+```python
+from hp_guard import InMemoryRateLimitStore, PolicyCall, RateLimitedPolicyStore
+
+policy = """
+version: 2
+rules:
+  - action: allow
+    target: {tool: search}
+    rate_limit: {max_calls: 10, window_seconds: 60}
+"""
+
+limited = RateLimitedPolicyStore(policy, InMemoryRateLimitStore())
+assert limited.resolve(PolicyCall(tool="search")).action.value == "allow"
+```
+
+Restarting the process clears quota state. The in-memory store accepts at most
+10,000 identity keys by default and fails closed when full. Persistent or
+distributed limits, custom keys, and host-side throttle execution remain out
+of scope.
 
 ## Integrate enforcement
 
@@ -210,8 +240,9 @@ security perimeter.
 - The adapter never executes effects. A host must execute an allowed effect and
   define host-side handling for `throttle`, `log`, `require_approval`, and
   `redirect` decisions.
-- v0.1 is stateless: it does not enforce rate limits, perform redirect
-  execution, combine multiple actions, retain policy memory, or run scripts.
+- v2 provides only process-local fixed-window rate limits. It does not provide
+  persistent or distributed state, redirect execution, multi-action rules,
+  policy memory, or scripts.
 - It has no proxy/sidecar transport, remote audit storage, encryption/key
   management, signed policies, automatic policy watching, telemetry, or hosted
   service.

@@ -22,3 +22,7 @@ policy time.
 recovery contract: complete-record corruption, a torn final record, interrupted
 rotation states, and exclusive writer lease contention. Both runtimes run this
 fixture before appending their activation record.
+
+`cases/rate_limits_v2.json` defines the explicit v2 fixed-window quota
+contract: valid limits, exhaustion, window reset, identity isolation,
+non-consumption by static deny or approval, and invalid policy forms.

@@ -1,6 +1,6 @@
 # Spec: Policy Language v2 Fixed-Window Rate Limits
 
-**Status:** Approved for implementation.
+**Status:** Implemented.
 
 ## Objective
 
@@ -13,8 +13,9 @@ This creates an enforceable decision, not a sleep, retry, or tool execution.
 
 - The first key is the normalized `(agent, user, tool)` call identity. Missing
   identity components are represented explicitly, never merged with strings.
-- State is process-local and ephemeral. Restart clears quotas; distributed or
-  durable quota storage is deliberately out of scope.
+- State is process-local, ephemeral, and bounded to 10,000 active identity
+  keys by default. Restart clears quotas; distributed or durable quota storage
+  is deliberately out of scope.
 - Production uses a monotonic clock. An injected clock that moves backwards
   fails closed instead of resetting a window.
 
@@ -45,12 +46,12 @@ rules:
   `[floor(now / window_seconds) * window_seconds, next_window)`, the first
   `max_calls` selected calls return `allow`; later selected calls return
   `throttle`. The decision retains the normal matching rule indices.
-- State-store error or monotonic-clock regression fails closed at the audited
-  enforcement boundary with stable `state_unavailable`; no effect request is
-  returned.
-- The pure `Engine` remains stateless. Stateful resolution is available only
-  through a `RateLimitedPolicyStore` / `RateLimitedAuditedPolicyStore` public
-  API using an injected `RateLimitStore` and monotonic clock.
+- State-store error or monotonic-clock regression fails closed at the stateful
+  resolver with stable `state_unavailable`; no effect request is returned.
+- The pure `Engine` remains stateless and is not a public v2 entry point. The
+  general `PolicyParser` continues to accept only v1; v2 parsing and stateful
+  resolution are available only through `RateLimitedPolicyStore` using an
+  injected `RateLimitStore` and monotonic clock.
 
 ## Public APIs
 
@@ -65,7 +66,7 @@ decision = limited.resolve(call)
 Rust:
 
 ```rust
-let limited = RateLimitedPolicyStore::with_policy(policy, InMemoryRateLimitStore::new(), clock)?;
+let limited = RateLimitedPolicyStore::with_clock(policy, state_store, clock)?;
 let decision = limited.resolve(&call)?;
 ```
 
@@ -83,6 +84,7 @@ Add `conformance/cases/rate_limits_v2.json`. Both runtimes must exercise:
 4. Static deny and higher-priority non-allow actions do not consume quota.
 5. Invalid limits and clock regression fail with stable errors.
 6. Concurrent callers cannot exceed the configured quota.
+7. State-capacity exhaustion fails closed.
 
 Tests are written RED before each implementation slice. `make check` remains
 the release gate.

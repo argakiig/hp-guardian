@@ -9,6 +9,8 @@ All notable changes to this source-first repository are documented here.
 - A shared YAML policy language implemented natively in Python and Rust.
 - Strict version-1 parsing, deterministic rule resolution, and executable
   cross-runtime conformance fixtures.
+- An explicit v2 fixed-window rate-limit resolver with atomic process-local
+  quotas, monotonic-clock failure closure, and shared cross-runtime fixtures.
 - Target matching for agent, tool, user, and context plus portable
   `args_match` and lexical `path_pattern` conditions.
 - Bounded `all`, `any`, and `not` conditions and absolute UTC
@@ -22,8 +24,8 @@ All notable changes to this source-first repository are documented here.
 
 ### Security and compatibility notes
 
-- The policy engine is not a sandbox, proxy, executor, or stateful rate-limit
-  system.
+- The policy engine is not a sandbox, proxy, executor, or distributed stateful
+  rate-limit system.
 - `throttle`, `log`, `require_approval`, and `redirect` resolve as policy
   decisions, but their host-side execution semantics are deferred.
 - v0.1 is source-only: Python and Rust package publication is intentionally
@@ -31,7 +33,7 @@ All notable changes to this source-first repository are documented here.
 
 ### Deferred
 
-- Stateful/rate-limit conditions, recurring schedules and local timezones,
+- Persistent/distributed rate limits, recurring schedules and local timezones,
   redirect execution, multi-action rules, memory, scripting, remote audit
   storage, signing/encryption, automatic policy watching, and transport
   adapters.
