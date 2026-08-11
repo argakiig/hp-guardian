@@ -26,7 +26,7 @@ impl Display for StateError {
 
 impl Error for StateError {}
 
-/// Opaque identity for one policy rule and normalized call subject.
+/// Stable identity for one policy rule and normalized call subject.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RateLimitKey {
     pub policy_digest: String,

@@ -58,3 +58,25 @@ def test_state_capacity_exhaustion_fails_closed() -> None:
     with pytest.raises(StateError) as raised:
         store.resolve(PolicyCall(agent="second", tool="search"))
     assert raised.value.code == "state_unavailable"
+
+
+def test_custom_store_failures_and_invalid_results_are_mapped_to_state_unavailable() -> None:
+    class BrokenStore:
+        def check_and_consume(self, _key, _limit, _now):
+            raise OSError("storage unavailable")
+
+    with pytest.raises(StateError) as error:
+        RateLimitedPolicyStore(POLICY, BrokenStore(), now_monotonic_seconds=lambda: 10).resolve(
+            PolicyCall(tool="search")
+        )
+    assert error.value.code == "state_unavailable"
+
+    class InvalidStore:
+        def check_and_consume(self, _key, _limit, _now):
+            return "allow"
+
+    with pytest.raises(StateError) as error:
+        RateLimitedPolicyStore(POLICY, InvalidStore(), now_monotonic_seconds=lambda: 10).resolve(
+            PolicyCall(tool="search")
+        )
+    assert error.value.code == "state_unavailable"

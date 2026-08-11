@@ -88,7 +88,15 @@ class RateLimitedPolicyStore:
         if limit is None:
             return decision
         key = RateLimitKey(self._digest, selected_rule, call.agent, call.user, call.tool)
-        if self._state_store.check_and_consume(key, limit, self._now()):
+        try:
+            consumed = self._state_store.check_and_consume(key, limit, self._now())
+        except StateError:
+            raise
+        except Exception as error:
+            raise StateError("state_unavailable", "rate-limit state store failed") from error
+        if type(consumed) is not bool:
+            raise StateError("state_unavailable", "rate-limit state store returned an invalid result")
+        if consumed:
             return decision
         return Decision(action=Action.THROTTLE, matched_rules=decision.matched_rules)
 
