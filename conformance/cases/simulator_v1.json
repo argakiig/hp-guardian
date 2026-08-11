@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "baseline_policy": "version: 1\nglobal:\n  default_action: allow\nrules:\n  - action: deny\n    target:\n      tool: shell\n    condition:\n      args_match: \"^rm .*\"\n",
+  "candidate_policy": "version: 1\nglobal:\n  default_action: allow\nrules:\n  - action: deny\n    target:\n      tool: shell\n    condition:\n      args_match: \"^rm .*\"\n  - action: deny\n    target:\n      tool: shell\n    condition:\n      args_match: \"^echo .*\"\n",
+  "trace": [
+    {
+      "version": 1,
+      "sequence": 1,
+      "event_id": "remove",
+      "call": {
+        "agent": "bot",
+        "tool": "shell",
+        "args": ["rm", "-rf", "/tmp/x"],
+        "user": null,
+        "context": {}
+      },
+      "expected": {
+        "policy": {
+          "version": 1,
+          "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+        },
+        "decision": "deny",
+        "matched_rules": [0]
+      }
+    },
+    {
+      "version": 1,
+      "sequence": 2,
+      "event_id": "echo",
+      "call": {
+        "agent": "bot",
+        "tool": "shell",
+        "args": ["echo", "hello"],
+        "user": null,
+        "context": {}
+      },
+      "expected": {
+        "policy": {
+          "version": 1,
+          "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+        },
+        "decision": "allow",
+        "matched_rules": []
+      }
+    }
+  ],
+  "single_reports": [
+    {
+      "version": 1,
+      "sequence": 1,
+      "event_id": "remove",
+      "expected": {
+        "policy": {
+          "version": 1,
+          "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+        },
+        "decision": "deny",
+        "matched_rules": [0]
+      },
+      "results": [
+        {
+          "policy": {
+            "version": 1,
+            "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+          },
+          "decision": "deny",
+          "matched_rules": [0],
+          "matches_expected": true
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "sequence": 2,
+      "event_id": "echo",
+      "expected": {
+        "policy": {
+          "version": 1,
+          "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+        },
+        "decision": "allow",
+        "matched_rules": []
+      },
+      "results": [
+        {
+          "policy": {
+            "version": 1,
+            "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+          },
+          "decision": "allow",
+          "matched_rules": [],
+          "matches_expected": true
+        }
+      ]
+    }
+  ],
+  "comparison_reports": [
+    {
+      "version": 1,
+      "sequence": 1,
+      "event_id": "remove",
+      "expected": {
+        "policy": {
+          "version": 1,
+          "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+        },
+        "decision": "deny",
+        "matched_rules": [0]
+      },
+      "results": [
+        {
+          "policy": {
+            "version": 1,
+            "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+          },
+          "decision": "deny",
+          "matched_rules": [0],
+          "matches_expected": true
+        },
+        {
+          "policy": {
+            "version": 1,
+            "sha256": "3378fe326aeace8130501fb4b6fdbf23c49138734d6785f2f058791efa8b8ef3"
+          },
+          "decision": "deny",
+          "matched_rules": [0]
+        }
+      ],
+      "comparison": {
+        "action_changed": false,
+        "matched_rules_changed": false
+      }
+    },
+    {
+      "version": 1,
+      "sequence": 2,
+      "event_id": "echo",
+      "expected": {
+        "policy": {
+          "version": 1,
+          "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+        },
+        "decision": "allow",
+        "matched_rules": []
+      },
+      "results": [
+        {
+          "policy": {
+            "version": 1,
+            "sha256": "8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"
+          },
+          "decision": "allow",
+          "matched_rules": [],
+          "matches_expected": true
+        },
+        {
+          "policy": {
+            "version": 1,
+            "sha256": "3378fe326aeace8130501fb4b6fdbf23c49138734d6785f2f058791efa8b8ef3"
+          },
+          "decision": "deny",
+          "matched_rules": [1]
+        }
+      ],
+      "comparison": {
+        "action_changed": true,
+        "matched_rules_changed": true
+      }
+    }
+  ],
+  "invalid_cases": [
+    {
+      "name": "malformed_json",
+      "jsonl": "{\n",
+      "error": {"code": "invalid_trace_json", "line": 1}
+    },
+    {
+      "name": "invalid_sequence",
+      "jsonl": "{\"version\":1,\"sequence\":1,\"call\":{\"agent\":null,\"tool\":null,\"args\":[],\"user\":null,\"context\":{}}}\n{\"version\":1,\"sequence\":3,\"call\":{\"agent\":null,\"tool\":null,\"args\":[],\"user\":null,\"context\":{}}}\n",
+      "error": {"code": "invalid_trace_sequence", "line": 2}
+    },
+    {
+      "name": "invalid_call",
+      "jsonl": "{\"version\":1,\"sequence\":1,\"call\":{\"agent\":null,\"tool\":null,\"args\":[1],\"user\":null,\"context\":{}}}\n",
+      "error": {"code": "invalid_trace_call", "line": 1}
+    }
+  ]
+}

@@ -39,6 +39,13 @@ event, or mutating runtime state.
   `invalid_trace_expected`. CLI errors are a JSON object on stderr containing
   the code and line number, exit non-zero, and emit no partial stdout.
 
+An event and its single-policy report use these exact field names:
+
+```json
+{"version":1,"sequence":1,"event_id":"remove","call":{"agent":"bot","tool":"shell","args":["rm","-rf","/tmp/x"],"user":null,"context":{}},"expected":{"policy":{"version":1,"sha256":"8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"},"decision":"deny","matched_rules":[0]}}
+{"version":1,"sequence":1,"event_id":"remove","expected":{"policy":{"version":1,"sha256":"8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"},"decision":"deny","matched_rules":[0]},"results":[{"policy":{"version":1,"sha256":"8a9221029667d9196eefd2b364e9cb2dfe098b2356acc777c8ebae09889a2e7e"},"decision":"deny","matched_rules":[0],"matches_expected":true}]}
+```
+
 ## Tech Stack and Commands
 
 Use existing standard-library JSON and hashing support in Python and existing
