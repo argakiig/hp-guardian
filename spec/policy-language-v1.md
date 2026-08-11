@@ -52,8 +52,9 @@ v1 validation rule.
 - `target` — optional mapping containing `agent`, `tool`, `user`, and/or
   `context`. Target values are strings. `context` is a mapping of string keys
   to string values.
-- `condition` — optional mapping containing `args_match` and/or
-  `path_pattern`. Conditions are ANDed.
+- `condition` — optional condition mapping. A leaf mapping may contain
+  `args_match`, `path_pattern`, and/or `time_window`; its leaves are implicitly
+  ANDed. A composition mapping contains exactly one of `all`, `any`, or `not`.
 
 Nested agent/tool rules inherit their enclosing `agent` and `tool` targets.
 They may repeat those values but may not override them.
@@ -70,6 +71,32 @@ groups, alternation, `+`, `?`, look-around assertions, and backreferences are
 errors. New constructs require a fixture proving equal results in both
 runtimes before they enter the contract.
 
+### Boolean and temporal conditions
+
+`all` and `any` each contain a sequence of condition mappings. `not` contains
+exactly one condition mapping. Composition mappings cannot mix an operator with
+leaf fields or another operator. `all: []` evaluates to true and `any: []`
+evaluates to false.
+
+`time_window` is a leaf mapping with exactly these two string fields:
+
+```yaml
+time_window:
+  start: "2026-08-11T12:00:00Z"
+  end: "2026-08-11T13:00:00Z"
+```
+
+Both timestamps must be valid RFC 3339 UTC instants ending in `Z`; offsets and
+open-ended windows are invalid. `end` must be later than `start`. A window
+matches when `start <= now < end`, so the start is inclusive and the end is
+exclusive. Production resolution uses the current UTC instant; callers may
+use the runtime's explicit-time resolution API for deterministic simulation
+and tests.
+
+To bound policy-controlled work, a rule condition contains at most 32 levels
+and 128 total condition nodes. Invalid condition shapes, timestamps, or limits
+return `invalid_condition` before the policy becomes active.
+
 ### Resolution
 
 1. All rules whose target and conditions match are recorded in declaration
@@ -83,8 +110,8 @@ runtimes before they enter the contract.
    `allow`.
 
 Actions are mutually exclusive in v1. Rate limiting, execution of redirects,
-boolean condition combinators, memory policy, and multi-action rules are not
-v1 behavior and must be rejected instead of ignored.
+memory policy, and multi-action rules are not v1 behavior and must be rejected
+instead of ignored.
 
 ## Decision and Audit Contract
 

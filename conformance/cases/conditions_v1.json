@@ -1,0 +1,225 @@
+[
+  {
+    "name": "leaf conditions remain implicitly ANDed",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: \"^rm .*\"\n      path_pattern: \"/etc/*\"\n",
+    "call": {
+      "args": [
+        "rm",
+        "/etc/passwd"
+      ],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "all combines leaf conditions",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      all:\n        - args_match: \"^rm .*\"\n        - not:\n            path_pattern: \"/safe/*\"\n",
+    "call": {
+      "args": [
+        "rm",
+        "/tmp/data"
+      ],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "any matches when one child matches",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      any:\n        - path_pattern: \"/etc/*\"\n        - args_match: \"^echo .*\"\n",
+    "call": {
+      "args": [
+        "echo",
+        "hello"
+      ],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "empty all is true",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      all: []\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "empty any is false",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      any: []\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "allow",
+      "matched_rules": []
+    }
+  },
+  {
+    "name": "time window includes its start",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      time_window:\n        start: \"2026-08-11T12:00:00Z\"\n        end: \"2026-08-11T13:00:00Z\"\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "now": "2026-08-11T12:00:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "time window excludes its end",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      time_window:\n        start: \"2026-08-11T12:00:00Z\"\n        end: \"2026-08-11T13:00:00Z\"\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "now": "2026-08-11T13:00:00Z",
+    "expect": {
+      "decision": "allow",
+      "matched_rules": []
+    }
+  },
+  {
+    "name": "time window composes with existing leaves",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      args_match: \"^rm .*\"\n      time_window:\n        start: \"2026-08-11T12:00:00Z\"\n        end: \"2026-08-11T13:00:00Z\"\n",
+    "call": {
+      "args": [
+        "rm",
+        "/tmp/data"
+      ],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "depth limit accepts 32 condition levels",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      all:\n        - all:\n            - all:\n                - all:\n                    - all:\n                        - all:\n                            - all:\n                                - all:\n                                    - all:\n                                        - all:\n                                            - all:\n                                                - all:\n                                                    - all:\n                                                        - all:\n                                                            - all:\n                                                                - all:\n                                                                    - all:\n                                                                        - all:\n                                                                            - all:\n                                                                                - all:\n                                                                                    - all:\n                                                                                        - all:\n                                                                                            - all:\n                                                                                                - all:\n                                                                                                    - all:\n                                                                                                        - all:\n                                                                                                            - all:\n                                                                                                                - all:\n                                                                                                                    - all:\n                                                                                                                        - all:\n                                                                                                                            - all:\n                                                                                                                                - args_match: \"^ok$\"\n",
+    "call": {
+      "args": [
+        "ok"
+      ],
+      "context": {}
+    },
+    "now": "2026-08-11T12:30:00Z",
+    "expect": {
+      "decision": "deny",
+      "matched_rules": [
+        0
+      ]
+    }
+  },
+  {
+    "name": "depth limit rejects 33 condition levels",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      all:\n        - all:\n            - all:\n                - all:\n                    - all:\n                        - all:\n                            - all:\n                                - all:\n                                    - all:\n                                        - all:\n                                            - all:\n                                                - all:\n                                                    - all:\n                                                        - all:\n                                                            - all:\n                                                                - all:\n                                                                    - all:\n                                                                        - all:\n                                                                            - all:\n                                                                                - all:\n                                                                                    - all:\n                                                                                        - all:\n                                                                                            - all:\n                                                                                                - all:\n                                                                                                    - all:\n                                                                                                        - all:\n                                                                                                            - all:\n                                                                                                                - all:\n                                                                                                                    - all:\n                                                                                                                        - all:\n                                                                                                                            - all:\n                                                                                                                                - all:\n                                                                                                                                    - args_match: \"^ok$\"\n",
+    "call": {
+      "args": [
+        "ok"
+      ],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "node limit rejects 129 condition nodes",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      all:\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n        - args_match: \"^ok$\"\n",
+    "call": {
+      "args": [
+        "ok"
+      ],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "boolean operator cannot mix with leaf fields",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      all: []\n      args_match: \"^ok$\"\n",
+    "call": {
+      "args": [
+        "ok"
+      ],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "not requires one condition mapping",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      not: null\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "time windows reject non UTC offsets",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      time_window:\n        start: \"2026-08-11T12:00:00+01:00\"\n        end: \"2026-08-11T13:00:00Z\"\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "time windows require exactly start and end",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      time_window:\n        start: \"2026-08-11T12:00:00Z\"\n        end: \"2026-08-11T13:00:00Z\"\n        timezone: UTC\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "time windows require a positive interval",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      time_window:\n        start: \"2026-08-11T13:00:00Z\"\n        end: \"2026-08-11T12:00:00Z\"\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  },
+  {
+    "name": "unknown boolean operator is rejected",
+    "policy": "version: 1\nrules:\n  - action: deny\n    condition:\n      and: []\n",
+    "call": {
+      "args": [],
+      "context": {}
+    },
+    "expect_error": "invalid_condition"
+  }
+]

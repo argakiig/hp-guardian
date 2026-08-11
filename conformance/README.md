@@ -11,3 +11,9 @@ trace errors. Both runtimes must serialize its reports identically.
 `cases/inline_adapter_v1.json` defines the host-local adapter boundary:
 normalized requests, allow-only effects, deadline failures, and invalid request
 values. Both runtimes must produce equivalent responses from this fixture.
+
+`cases/conditions_v1.json` defines boolean and temporal condition behavior:
+leaf compatibility, composition truth values, UTC interval boundaries, and
+parser rejection for malformed or excessive condition trees. Each successful
+case supplies an explicit UTC instant so both runtimes evaluate the same
+policy time.
