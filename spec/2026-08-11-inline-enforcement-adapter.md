@@ -14,8 +14,8 @@ executing an effect after it receives an `allow` response.
 - `EnforcementRequest` contains exactly an opaque `caller_id`, a retry-stable
   opaque `correlation_id`, an integer `deadline_unix_ms`, and a normalized
   `PolicyCall`. Caller and correlation IDs are non-empty UTF-8 strings of at
-  most 256 bytes; the deadline is a non-negative integer Unix timestamp in
-  milliseconds.
+  most 256 bytes; the deadline is a Unix timestamp in milliseconds in the
+  inclusive range `0` through `2^64 - 1`.
 - The adapter uses an injected millisecond clock in tests and the system clock
   in production. It rejects a request with `deadline_unix_ms <= now` using the
   stable `deadline_exceeded` error before policy evaluation or audit writing.

@@ -125,6 +125,22 @@
         }
       },
       "error": "invalid_request"
+    },
+    {
+      "name": "deadline_out_of_range",
+      "request": {
+        "caller_id": "host-a",
+        "correlation_id": "req-large-deadline",
+        "deadline_unix_ms": 18446744073709551616,
+        "call": {
+          "agent": "bot",
+          "tool": "shell",
+          "args": [],
+          "user": null,
+          "context": {}
+        }
+      },
+      "error": "invalid_request"
     }
   ]
 }
