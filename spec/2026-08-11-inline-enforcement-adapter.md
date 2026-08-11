@@ -37,6 +37,12 @@ executing an effect after it receives an `allow` response.
   raw args and context remain absent. Reusing a correlation ID records another
   authorization attempt. This release deliberately performs no deduplication.
 
+An allowed response has this exact shape; a non-allow response omits `effect`:
+
+```json
+{"caller_id":"host-a","correlation_id":"req-allow","deadline_unix_ms":1001,"policy":{"version":1,"sha256":"962576725e71c685450a6655397168e28716aee2af6f15c41a0f4df1c2cc43d6"},"decision":"allow","matched_rules":[],"effect":{"caller_id":"host-a","correlation_id":"req-allow","deadline_unix_ms":1001,"policy":{"version":1,"sha256":"962576725e71c685450a6655397168e28716aee2af6f15c41a0f4df1c2cc43d6"},"decision":"allow","matched_rules":[],"call":{"agent":"bot","tool":"shell","args":["echo","hello"],"user":null,"context":{}}}}
+```
+
 ## Tech Stack and Commands
 
 Use existing Python and Rust standard-library time support plus the existing

@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "now_unix_ms": 1000,
+  "policy": "version: 1\nglobal:\n  default_action: allow\nrules:\n  - action: deny\n    target:\n      tool: shell\n    condition:\n      args_match: \"^rm .*\"\n  - action: log\n    target:\n      tool: shell\n    condition:\n      args_match: \"^echo .*\"\n",
+  "requests": [
+    {
+      "caller_id": "host-a",
+      "correlation_id": "req-allow",
+      "deadline_unix_ms": 1001,
+      "call": {
+        "agent": "bot",
+        "tool": "shell",
+        "args": ["cat", "/tmp/x"],
+        "user": null,
+        "context": {}
+      }
+    },
+    {
+      "caller_id": "host-a",
+      "correlation_id": "req-deny",
+      "deadline_unix_ms": 1001,
+      "call": {
+        "agent": "bot",
+        "tool": "shell",
+        "args": ["rm", "-rf", "/tmp/x"],
+        "user": null,
+        "context": {}
+      }
+    },
+    {
+      "caller_id": "host-a",
+      "correlation_id": "req-log",
+      "deadline_unix_ms": 1001,
+      "call": {
+        "agent": "bot",
+        "tool": "shell",
+        "args": ["echo", "hello"],
+        "user": null,
+        "context": {}
+      }
+    }
+  ],
+  "responses": [
+    {
+      "caller_id": "host-a",
+      "correlation_id": "req-allow",
+      "deadline_unix_ms": 1001,
+      "policy": {
+        "version": 1,
+        "sha256": "962576725e71c685450a6655397168e28716aee2af6f15c41a0f4df1c2cc43d6"
+      },
+      "decision": "allow",
+      "matched_rules": [],
+      "effect": {
+        "caller_id": "host-a",
+        "correlation_id": "req-allow",
+        "deadline_unix_ms": 1001,
+        "policy": {
+          "version": 1,
+          "sha256": "962576725e71c685450a6655397168e28716aee2af6f15c41a0f4df1c2cc43d6"
+        },
+        "decision": "allow",
+        "matched_rules": [],
+        "call": {
+          "agent": "bot",
+          "tool": "shell",
+          "args": ["cat", "/tmp/x"],
+          "user": null,
+          "context": {}
+        }
+      }
+    },
+    {
+      "caller_id": "host-a",
+      "correlation_id": "req-deny",
+      "deadline_unix_ms": 1001,
+      "policy": {
+        "version": 1,
+        "sha256": "962576725e71c685450a6655397168e28716aee2af6f15c41a0f4df1c2cc43d6"
+      },
+      "decision": "deny",
+      "matched_rules": [0]
+    },
+    {
+      "caller_id": "host-a",
+      "correlation_id": "req-log",
+      "deadline_unix_ms": 1001,
+      "policy": {
+        "version": 1,
+        "sha256": "962576725e71c685450a6655397168e28716aee2af6f15c41a0f4df1c2cc43d6"
+      },
+      "decision": "log",
+      "matched_rules": [1]
+    }
+  ],
+  "error_cases": [
+    {
+      "name": "expired_deadline",
+      "request": {
+        "caller_id": "host-a",
+        "correlation_id": "req-expired",
+        "deadline_unix_ms": 1000,
+        "call": {
+          "agent": "bot",
+          "tool": "shell",
+          "args": [],
+          "user": null,
+          "context": {}
+        }
+      },
+      "error": "deadline_exceeded"
+    },
+    {
+      "name": "invalid_request",
+      "request": {
+        "caller_id": "",
+        "correlation_id": "req-invalid",
+        "deadline_unix_ms": 1001,
+        "call": {
+          "agent": "bot",
+          "tool": "shell",
+          "args": [],
+          "user": null,
+          "context": {}
+        }
+      },
+      "error": "invalid_request"
+    }
+  ]
+}
