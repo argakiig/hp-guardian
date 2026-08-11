@@ -16,6 +16,10 @@ from hp_guard import (
     PolicyParser,
     PolicySnapshot,
     Rule,
+    SimulationPolicy,
+    SimulationReport,
+    TraceError,
+    simulate_trace,
 )
 
 
@@ -36,6 +40,10 @@ def test_package_root_declares_and_exports_its_public_api():
         "PolicyParser": PolicyParser,
         "PolicySnapshot": PolicySnapshot,
         "Rule": Rule,
+        "SimulationPolicy": SimulationPolicy,
+        "SimulationReport": SimulationReport,
+        "TraceError": TraceError,
+        "simulate_trace": simulate_trace,
     }
 
     assert set(hp_guard.__all__) == set(expected_exports)
