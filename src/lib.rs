@@ -5,6 +5,7 @@ pub mod logging;
 pub mod matching;
 pub mod models;
 pub mod parser;
+pub mod simulator;
 
 // Re-export key types for convenience.
 pub use audit::{
@@ -15,3 +16,7 @@ pub use engine::Engine;
 pub use logging::AuditLogger;
 pub use models::{Action, AuditEntry, Decision, PolicyCall, PolicyError, Rule};
 pub use parser::PolicyParser;
+pub use simulator::{
+    parse_trace, simulate_trace, ExpectedMetadata, PolicyIdentity, SimulationComparison,
+    SimulationPolicy, SimulationReport, SimulationResult, TraceError, TraceEvent,
+};
