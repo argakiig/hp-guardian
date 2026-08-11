@@ -40,6 +40,9 @@ pub enum PolicyError {
     InvalidTarget {
         target: String,
     },
+    InvalidField {
+        field: String,
+    },
     ConflictingTarget {
         target: String,
     },
@@ -62,6 +65,7 @@ impl Display for PolicyError {
             Self::InvalidTarget { target } => {
                 write!(formatter, "unsupported policy target: {target}")
             }
+            Self::InvalidField { field } => write!(formatter, "invalid policy field: {field}"),
             Self::ConflictingTarget { target } => {
                 write!(
                     formatter,
@@ -83,6 +87,7 @@ impl Error for PolicyError {
             Self::InvalidAction { .. }
             | Self::InvalidCondition { .. }
             | Self::InvalidTarget { .. }
+            | Self::InvalidField { .. }
             | Self::ConflictingTarget { .. } => None,
         }
     }

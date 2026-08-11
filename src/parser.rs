@@ -3,6 +3,7 @@ use crate::Engine;
 use std::collections::BTreeMap;
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RuleEntry {
     action: String,
     target: Option<BTreeMap<String, serde_yaml::Value>>,
@@ -10,26 +11,19 @@ struct RuleEntry {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ToolConfig {
     rules: Vec<RuleEntry>,
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AgentConfig {
-    tools: BTreeMap<String, ToolConfig>,
-}
-
-#[derive(serde::Deserialize)]
-struct PolicyFile {
-    #[serde(default)]
-    global: GlobalConfig,
-    #[serde(default)]
-    rules: Vec<RuleEntry>,
-    #[serde(default)]
-    agents: BTreeMap<String, AgentConfig>,
+    tools: serde_yaml::Mapping,
 }
 
 #[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GlobalConfig {
     default_action: Option<String>,
 }
@@ -39,37 +33,102 @@ pub struct PolicyParser;
 
 impl PolicyParser {
     pub fn parse(yaml_str: &str) -> Result<Engine, PolicyError> {
-        let policy: PolicyFile =
+        let policy: serde_yaml::Value =
             serde_yaml::from_str(yaml_str).map_err(PolicyError::InvalidYaml)?;
-        let default_action = policy
-            .global
-            .default_action
-            .as_deref()
-            .map(parse_action)
-            .transpose()?
-            .unwrap_or(Action::Allow);
+        let fields = policy
+            .as_mapping()
+            .ok_or_else(|| PolicyError::InvalidField {
+                field: "policy must be a mapping".to_owned(),
+            })?;
+        let mut default_action = Action::Allow;
         let mut rules: Vec<Rule> = Vec::new();
         let mut index: usize = 0;
 
-        for rule_entry in &policy.rules {
-            add_rule(&mut rules, rule_entry, BTreeMap::new(), &mut index)?;
-        }
-
-        for (agent_name, agent_config) in &policy.agents {
-            for (tool_name, tool_config) in &agent_config.tools {
-                for rule_entry in &tool_config.rules {
-                    let enclosing_target = [
-                        ("agent".to_owned(), agent_name.clone()),
-                        ("tool".to_owned(), tool_name.clone()),
-                    ]
-                    .into();
-                    add_rule(&mut rules, rule_entry, enclosing_target, &mut index)?;
+        for (field, value) in fields {
+            let field = field.as_str().ok_or_else(|| PolicyError::InvalidField {
+                field: "top-level field names must be strings".to_owned(),
+            })?;
+            match field {
+                "global" => {
+                    let global: GlobalConfig =
+                        serde_yaml::from_value(value.clone()).map_err(PolicyError::InvalidYaml)?;
+                    default_action = global
+                        .default_action
+                        .as_deref()
+                        .map(parse_action)
+                        .transpose()?
+                        .unwrap_or(Action::Allow);
+                }
+                "rules" => add_rules(&mut rules, value, BTreeMap::new(), &mut index)?,
+                "agents" => add_agents(&mut rules, value, &mut index)?,
+                _ => {
+                    return Err(PolicyError::InvalidField {
+                        field: field.to_owned(),
+                    });
                 }
             }
         }
 
         Ok(Engine::with_default_action(rules, default_action))
     }
+}
+
+fn add_agents(
+    rules: &mut Vec<Rule>,
+    agents: &serde_yaml::Value,
+    index: &mut usize,
+) -> Result<(), PolicyError> {
+    let agents = agents
+        .as_mapping()
+        .ok_or_else(|| PolicyError::InvalidField {
+            field: "agents must be a mapping".to_owned(),
+        })?;
+    for (agent_name, agent_value) in agents {
+        let agent_name = agent_name
+            .as_str()
+            .ok_or_else(|| PolicyError::InvalidField {
+                field: "agent names must be strings".to_owned(),
+            })?;
+        let agent: AgentConfig =
+            serde_yaml::from_value(agent_value.clone()).map_err(PolicyError::InvalidYaml)?;
+        for (tool_name, tool_value) in agent.tools {
+            let tool_name = tool_name
+                .as_str()
+                .ok_or_else(|| PolicyError::InvalidField {
+                    field: "tool names must be strings".to_owned(),
+                })?;
+            let tool: ToolConfig =
+                serde_yaml::from_value(tool_value).map_err(PolicyError::InvalidYaml)?;
+            let enclosing_target: BTreeMap<String, String> = [
+                ("agent".to_owned(), agent_name.to_owned()),
+                ("tool".to_owned(), tool_name.to_owned()),
+            ]
+            .into();
+            for rule_entry in &tool.rules {
+                add_rule(rules, rule_entry, enclosing_target.clone(), index)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn add_rules(
+    rules: &mut Vec<Rule>,
+    value: &serde_yaml::Value,
+    enclosing_target: BTreeMap<String, String>,
+    index: &mut usize,
+) -> Result<(), PolicyError> {
+    let entries = value
+        .as_sequence()
+        .ok_or_else(|| PolicyError::InvalidField {
+            field: "rules must be a sequence".to_owned(),
+        })?;
+    for entry in entries {
+        let rule_entry: RuleEntry =
+            serde_yaml::from_value(entry.clone()).map_err(PolicyError::InvalidYaml)?;
+        add_rule(rules, &rule_entry, enclosing_target.clone(), index)?;
+    }
+    Ok(())
 }
 
 fn add_rule(

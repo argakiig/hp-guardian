@@ -224,3 +224,52 @@ agents:
     assert_eq!(decision.action, Action::Deny);
     assert_eq!(decision.matched_rules, vec![0, 1]);
 }
+
+#[test]
+fn test_unknown_global_field_is_rejected_instead_of_falling_back_to_allow() {
+    let yaml = r#"
+global:
+  default_actoin: deny
+"#;
+
+    assert!(PolicyParser::parse(yaml).is_err());
+}
+
+#[test]
+fn test_unknown_top_level_field_is_rejected() {
+    let yaml = r#"
+agants:
+  bot: {}
+"#;
+
+    assert!(PolicyParser::parse(yaml).is_err());
+}
+
+#[test]
+fn test_rule_indices_follow_the_document_declaration_order() {
+    let yaml = r#"
+agents:
+  bot:
+    tools:
+      curl:
+        rules:
+          - action: log
+            target:
+              user: admin
+rules:
+  - action: log
+    target:
+      agent: bot
+      tool: curl
+"#;
+    let engine = PolicyParser::parse(yaml).expect("policy is valid");
+
+    assert_eq!(
+        engine.rules[0].target.get("user").map(String::as_str),
+        Some("admin")
+    );
+    assert_eq!(
+        engine.rules[1].target.get("agent").map(String::as_str),
+        Some("bot")
+    );
+}

@@ -5,8 +5,6 @@ use hp_guard::Action;
 
 const POLICY: &str = r#"
 global:
-  rate_limit: 100/min
-  log_all: true
   default_action: allow
 
 agents:
@@ -17,7 +15,6 @@ agents:
           - action: deny
             condition:
               args_match: ".*--delete.*"
-        rate_limit: 20/min
       write_file:
         rules:
           - action: deny
