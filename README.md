@@ -103,6 +103,25 @@ assert_eq!(decision.action.as_str(), "deny");
 `PolicyError::code()` when a caller requires a stable, language-neutral error
 code.
 
+## Offline policy simulation
+
+The simulator replays JSON Lines tool-call traces without executing tools,
+writing audit records, or mutating policy state. It accepts one baseline policy
+and an optional candidate policy, then emits one JSON Lines report per trace
+event. Reports omit raw arguments and context.
+
+```bash
+PYTHONPATH=src uv run --with pyyaml python -m hp_guard.simulate \
+  --policy baseline.yaml --trace calls.jsonl --compare candidate.yaml
+
+cargo run --bin hp-guard-simulate -- \
+  --policy baseline.yaml --trace calls.jsonl --compare candidate.yaml
+```
+
+Trace events require `version: 1`, consecutive positive `sequence` values, and
+a normalized `call` object. The complete format, stable errors, and shared
+examples are defined in [Policy Simulator and Trace Format](spec/2026-08-11-policy-simulator-and-trace-format.md).
+
 ## Verification
 
 ```bash
