@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 #[derive(serde::Deserialize)]
 struct RuleEntry {
     action: String,
+    target: Option<BTreeMap<String, serde_yaml::Value>>,
     condition: Option<BTreeMap<String, String>>,
 }
 
@@ -53,14 +54,16 @@ impl PolicyParser {
                 for rule_entry in &tool_config.rules {
                     let action = parse_action(&rule_entry.action)?;
 
-                    let mut target = BTreeMap::new();
-                    target.insert("agent".to_string(), agent_name.clone());
-                    target.insert("tool".to_string(), tool_name.clone());
+                    let mut target = parse_target(rule_entry.target.as_ref())?;
+                    add_enclosing_target(&mut target, "agent", agent_name)?;
+                    add_enclosing_target(&mut target, "tool", tool_name)?;
+                    let condition = rule_entry.condition.clone().unwrap_or_default();
+                    validate_conditions(&condition)?;
 
                     rules.push(Rule {
                         action,
                         target,
-                        condition: rule_entry.condition.clone().unwrap_or_default(),
+                        condition,
                         rule_index: index,
                     });
                     index += 1;
@@ -84,4 +87,86 @@ fn parse_action(action: &str) -> Result<Action, PolicyError> {
             action: action.to_owned(),
         }),
     }
+}
+
+fn parse_target(
+    target: Option<&BTreeMap<String, serde_yaml::Value>>,
+) -> Result<BTreeMap<String, String>, PolicyError> {
+    let mut parsed = BTreeMap::new();
+
+    for (key, value) in target.into_iter().flatten() {
+        match key.as_str() {
+            "agent" | "tool" | "user" => {
+                let value = value.as_str().ok_or_else(|| PolicyError::InvalidTarget {
+                    target: key.clone(),
+                })?;
+                parsed.insert(key.clone(), value.to_owned());
+            }
+            "context" => {
+                let context = value
+                    .as_mapping()
+                    .ok_or_else(|| PolicyError::InvalidTarget {
+                        target: key.clone(),
+                    })?;
+                for (context_key, context_value) in context {
+                    let context_key =
+                        context_key
+                            .as_str()
+                            .ok_or_else(|| PolicyError::InvalidTarget {
+                                target: "context".to_owned(),
+                            })?;
+                    let context_value =
+                        context_value
+                            .as_str()
+                            .ok_or_else(|| PolicyError::InvalidTarget {
+                                target: format!("context.{context_key}"),
+                            })?;
+                    parsed.insert(format!("context.{context_key}"), context_value.to_owned());
+                }
+            }
+            _ => {
+                return Err(PolicyError::InvalidTarget {
+                    target: key.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(parsed)
+}
+
+fn add_enclosing_target(
+    target: &mut BTreeMap<String, String>,
+    key: &str,
+    enclosing_value: &str,
+) -> Result<(), PolicyError> {
+    match target.get(key) {
+        Some(value) if value != enclosing_value => Err(PolicyError::ConflictingTarget {
+            target: key.to_owned(),
+        }),
+        _ => {
+            target.insert(key.to_owned(), enclosing_value.to_owned());
+            Ok(())
+        }
+    }
+}
+
+fn validate_conditions(condition: &BTreeMap<String, String>) -> Result<(), PolicyError> {
+    for (key, value) in condition {
+        match key.as_str() {
+            "args_match" => {
+                regex::Regex::new(value).map_err(|source| PolicyError::InvalidRegex {
+                    pattern: value.clone(),
+                    source,
+                })?;
+            }
+            "path_pattern" => {}
+            _ => {
+                return Err(PolicyError::InvalidCondition {
+                    condition: key.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }

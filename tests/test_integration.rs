@@ -55,8 +55,6 @@ fn test_research_bot_curl_get_allowed() {
 
 #[test]
 fn test_research_bot_write_file_etc_denied() {
-    // path_pattern is unsupported — unknown condition key causes evaluate() to return false,
-    // so the rule never matches and the call defaults to allow.
     let engine = PolicyParser::parse(POLICY).expect("policy is valid");
     let call = PolicyCall {
         agent: Some("research-bot".into()),
@@ -66,7 +64,7 @@ fn test_research_bot_write_file_etc_denied() {
         context: Default::default(),
     };
     let decision = engine.resolve_call(&call);
-    assert_eq!(decision.action, Action::Allow);
+    assert_eq!(decision.action, Action::Deny);
 }
 
 #[test]

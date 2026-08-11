@@ -17,7 +17,22 @@ pub enum Action {
 #[derive(Debug)]
 pub enum PolicyError {
     InvalidYaml(serde_yaml::Error),
-    InvalidAction { action: String },
+    InvalidAction {
+        action: String,
+    },
+    InvalidCondition {
+        condition: String,
+    },
+    InvalidTarget {
+        target: String,
+    },
+    ConflictingTarget {
+        target: String,
+    },
+    InvalidRegex {
+        pattern: String,
+        source: regex::Error,
+    },
 }
 
 impl Display for PolicyError {
@@ -27,6 +42,21 @@ impl Display for PolicyError {
             Self::InvalidAction { action } => {
                 write!(formatter, "unsupported policy action: {action}")
             }
+            Self::InvalidCondition { condition } => {
+                write!(formatter, "unsupported policy condition: {condition}")
+            }
+            Self::InvalidTarget { target } => {
+                write!(formatter, "unsupported policy target: {target}")
+            }
+            Self::ConflictingTarget { target } => {
+                write!(
+                    formatter,
+                    "nested target conflicts with enclosing {target} scope"
+                )
+            }
+            Self::InvalidRegex { pattern, source } => {
+                write!(formatter, "invalid args_match regex {pattern:?}: {source}")
+            }
         }
     }
 }
@@ -35,7 +65,11 @@ impl Error for PolicyError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidYaml(error) => Some(error),
-            Self::InvalidAction { .. } => None,
+            Self::InvalidRegex { source, .. } => Some(source),
+            Self::InvalidAction { .. }
+            | Self::InvalidCondition { .. }
+            | Self::InvalidTarget { .. }
+            | Self::ConflictingTarget { .. } => None,
         }
     }
 }

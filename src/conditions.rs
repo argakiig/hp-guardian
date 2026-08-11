@@ -7,7 +7,19 @@ pub fn evaluate(rule: &Rule, call: &PolicyCall) -> bool {
         match key.as_str() {
             "args_match" => {
                 let concatenated = call.args.join(" ");
-                if !Regex::new(value).unwrap().is_match(&concatenated) {
+                let Ok(regex) = Regex::new(value) else {
+                    return false;
+                };
+                if !regex.is_match(&concatenated) {
+                    return false;
+                }
+            }
+            "path_pattern" => {
+                if !call
+                    .args
+                    .iter()
+                    .any(|argument| path_matches(value, argument))
+                {
                     return false;
                 }
             }
@@ -18,4 +30,28 @@ pub fn evaluate(rule: &Rule, call: &PolicyCall) -> bool {
         }
     }
     true
+}
+
+fn path_matches(pattern: &str, path: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let path: Vec<char> = path.chars().collect();
+    let mut previous = vec![false; path.len() + 1];
+    previous[0] = true;
+
+    for pattern_character in pattern {
+        let mut current = vec![false; path.len() + 1];
+        if pattern_character == '*' {
+            current[0] = previous[0];
+            for index in 1..=path.len() {
+                current[index] = previous[index] || current[index - 1];
+            }
+        } else {
+            for index in 1..=path.len() {
+                current[index] = previous[index - 1] && pattern_character == path[index - 1];
+            }
+        }
+        previous = current;
+    }
+
+    previous[path.len()]
 }

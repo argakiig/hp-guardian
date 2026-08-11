@@ -105,3 +105,98 @@ agents:
 
     assert!(PolicyParser::parse(yaml).is_err());
 }
+
+#[test]
+fn test_invalid_args_match_regex_is_rejected_at_parse_time() {
+    let yaml = r#"
+agents:
+  bot:
+    tools:
+      curl:
+        rules:
+          - action: deny
+            condition:
+              args_match: "["
+"#;
+
+    assert!(PolicyParser::parse(yaml).is_err());
+}
+
+#[test]
+fn test_unknown_condition_is_rejected_at_parse_time() {
+    let yaml = r#"
+agents:
+  bot:
+    tools:
+      curl:
+        rules:
+          - action: deny
+            condition:
+              unsupported: value
+"#;
+
+    assert!(PolicyParser::parse(yaml).is_err());
+}
+
+#[test]
+fn test_rule_target_user_limits_the_enclosing_tool_rule() {
+    let yaml = r#"
+agents:
+  bot:
+    tools:
+      curl:
+        rules:
+          - action: deny
+            target:
+              user: admin
+"#;
+    let engine = PolicyParser::parse(yaml).expect("policy is valid");
+
+    let admin_call = PolicyCall {
+        agent: Some("bot".into()),
+        tool: Some("curl".into()),
+        user: Some("admin".into()),
+        ..Default::default()
+    };
+    let guest_call = PolicyCall {
+        agent: Some("bot".into()),
+        tool: Some("curl".into()),
+        user: Some("guest".into()),
+        ..Default::default()
+    };
+
+    assert_eq!(engine.resolve_call(&admin_call).action, Action::Deny);
+    assert_eq!(engine.resolve_call(&guest_call).action, Action::Allow);
+}
+
+#[test]
+fn test_rule_target_context_limits_the_enclosing_tool_rule() {
+    let yaml = r#"
+agents:
+  bot:
+    tools:
+      curl:
+        rules:
+          - action: deny
+            target:
+              context:
+                phase: prompt
+"#;
+    let engine = PolicyParser::parse(yaml).expect("policy is valid");
+
+    let prompt_call = PolicyCall {
+        agent: Some("bot".into()),
+        tool: Some("curl".into()),
+        context: [("phase".into(), "prompt".into())].into(),
+        ..Default::default()
+    };
+    let execution_call = PolicyCall {
+        agent: Some("bot".into()),
+        tool: Some("curl".into()),
+        context: [("phase".into(), "execution".into())].into(),
+        ..Default::default()
+    };
+
+    assert_eq!(engine.resolve_call(&prompt_call).action, Action::Deny);
+    assert_eq!(engine.resolve_call(&execution_call).action, Action::Allow);
+}

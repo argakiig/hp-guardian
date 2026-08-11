@@ -20,6 +20,14 @@ pub fn rule_matches_rule(rule: &Rule, call: &PolicyCall) -> bool {
                 None => return false,
                 _ => {}
             },
+            key if key.starts_with("context.") => {
+                let Some(context_key) = key.strip_prefix("context.") else {
+                    return false;
+                };
+                if call.context.get(context_key) != Some(value) {
+                    return false;
+                }
+            }
             _ => {
                 // Unknown target keys cause the rule to NOT match
                 return false;
