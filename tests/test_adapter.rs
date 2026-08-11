@@ -135,8 +135,7 @@ fn closes_when_the_required_audit_write_fails() {
     let fixture = fixture();
     let path = audit_path("audit-failure");
     let mut adapter = adapter(fixture["policy"].as_str().expect("policy"), &path);
-    fs::remove_file(&path).expect("remove audit log");
-    fs::remove_dir(path.parent().expect("audit parent")).expect("remove audit directory");
+    adapter.close();
     let request = EnforcementRequest::from_value(&fixture["requests"][0]).expect("request");
 
     assert!(matches!(

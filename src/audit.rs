@@ -6,10 +6,10 @@ use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static CORRELATION_NONCE: AtomicU64 = AtomicU64::new(1);
@@ -80,6 +80,11 @@ pub enum AuditError {
         max_bytes: usize,
         actual_bytes: usize,
     },
+    LockUnavailable,
+    Corrupt,
+    RecoveryFailed,
+    RecoveryUnsupported,
+    Closed,
 }
 
 impl Display for AuditError {
@@ -99,6 +104,11 @@ impl Display for AuditError {
                 formatter,
                 "outcome detail is {actual_bytes} bytes; maximum is {max_bytes} bytes"
             ),
+            Self::LockUnavailable => formatter.write_str("audit_lock_unavailable"),
+            Self::Corrupt => formatter.write_str("audit_corrupt"),
+            Self::RecoveryFailed => formatter.write_str("audit_recovery_failed"),
+            Self::RecoveryUnsupported => formatter.write_str("audit_recovery_unsupported"),
+            Self::Closed => formatter.write_str("audit_closed"),
         }
     }
 }
@@ -111,7 +121,12 @@ impl Error for AuditError {
             Self::Policy(error) => Some(error),
             Self::NoActivePolicy
             | Self::InvalidConfiguration { .. }
-            | Self::OutcomeDetailTooLong { .. } => None,
+            | Self::OutcomeDetailTooLong { .. }
+            | Self::LockUnavailable
+            | Self::Corrupt
+            | Self::RecoveryFailed
+            | Self::RecoveryUnsupported
+            | Self::Closed => None,
         }
     }
 }
@@ -121,6 +136,9 @@ pub struct AuditLog {
     path: PathBuf,
     config: AuditLogConfig,
     now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    lease: Mutex<Option<File>>,
+    recovery_complete: AtomicBool,
+    closed: AtomicBool,
 }
 
 impl AuditLog {
@@ -139,6 +157,9 @@ impl AuditLog {
             path: path.into(),
             config,
             now,
+            lease: Mutex::new(None),
+            recovery_complete: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -147,6 +168,7 @@ impl AuditLog {
     }
 
     fn append(&self, record: &AuditRecord) -> Result<(), AuditError> {
+        self.ensure_ready()?;
         let mut encoded = serde_json::to_vec(record).map_err(AuditError::Serialization)?;
         encoded.push(b'\n');
         self.prune_expired_backups()?;
@@ -156,6 +178,63 @@ impl AuditLog {
         set_owner_only_permissions(&file).map_err(AuditError::Io)?;
         file.write_all(&encoded).map_err(AuditError::Io)?;
         file.sync_data().map_err(AuditError::Io)
+    }
+
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        if let Ok(mut lease) = self.lease.lock() {
+            *lease = None;
+        }
+    }
+
+    fn ensure_ready(&self) -> Result<(), AuditError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(AuditError::Closed);
+        }
+        let mut lease = self.lease.lock().map_err(|_| AuditError::RecoveryFailed)?;
+        if lease.is_none() {
+            *lease = Some(acquire_lease(&self.path)?);
+        }
+        drop(lease);
+        if !self.recovery_complete.swap(true, Ordering::AcqRel) {
+            if let Err(error) = self.recover_tails() {
+                self.recovery_complete.store(false, Ordering::Release);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn recover_tails(&self) -> Result<(), AuditError> {
+        let manifest = PathBuf::from(format!("{}.rotation.json", self.path.display()));
+        if manifest.exists()
+            || self
+                .path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .read_dir()
+                .map_err(AuditError::Io)?
+                .any(|entry| {
+                    entry.ok().is_some_and(|entry| {
+                        entry.file_name().to_string_lossy().starts_with(&format!(
+                            "{}.rotation.",
+                            self.path.file_name().unwrap().to_string_lossy()
+                        ))
+                    })
+                })
+        {
+            return Err(AuditError::RecoveryFailed);
+        }
+        let mut paths = vec![self.path.clone()];
+        for index in 1..=self.config.max_rotated_files {
+            paths.push(self.backup_path(index));
+        }
+        for path in paths {
+            if path.exists() {
+                recover_tail(&path)?;
+            }
+        }
+        Ok(())
     }
 
     fn rotate_before_append(&self, next_record_bytes: u64) -> Result<(), AuditError> {
@@ -248,6 +327,111 @@ fn validate_config(config: &AuditLogConfig) -> Result<(), AuditError> {
         });
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn acquire_lease(path: &Path) -> Result<File, AuditError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+
+    let parent = path.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent).map_err(AuditError::Io)?;
+    let lock_path = PathBuf::from(format!("{}.lock", path.display()));
+    validate_regular_or_absent(&lock_path).map_err(AuditError::Io)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o600)
+        .open(&lock_path)
+        .map_err(AuditError::Io)?;
+    set_owner_only_permissions(&file).map_err(AuditError::Io)?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.kind() == std::io::ErrorKind::WouldBlock {
+            Err(AuditError::LockUnavailable)
+        } else {
+            Err(AuditError::Io(error))
+        };
+    }
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(AuditError::Io)?;
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn acquire_lease(_path: &Path) -> Result<File, AuditError> {
+    Err(AuditError::RecoveryUnsupported)
+}
+
+fn recover_tail(path: &Path) -> Result<(), AuditError> {
+    validate_regular_or_absent(path).map_err(AuditError::Io)?;
+    let mut content = Vec::new();
+    let mut read_file = open_read_nofollow(path).map_err(AuditError::Io)?;
+    read_file
+        .read_to_end(&mut content)
+        .map_err(AuditError::Io)?;
+    let last_newline = content.iter().rposition(|byte| *byte == b'\n');
+    let complete_end = last_newline.map_or(0, |index| index + 1);
+    let records = if complete_end == 0 {
+        &[]
+    } else {
+        &content[..complete_end - 1]
+    };
+    for line in records.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            return Err(AuditError::Corrupt);
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(line).map_err(|_| AuditError::Corrupt)?;
+        if !value.is_object() {
+            return Err(AuditError::Corrupt);
+        }
+    }
+    let tail = &content[complete_end..];
+    if tail.is_empty() {
+        return Ok(());
+    }
+    let tail_text = std::str::from_utf8(tail).map_err(|_| AuditError::Corrupt)?;
+    if serde_json::from_str::<serde_json::Value>(tail_text).is_ok() {
+        return Err(AuditError::Corrupt);
+    }
+    let mut file = open_write_nofollow(path).map_err(AuditError::Io)?;
+    file.set_len(complete_end as u64).map_err(AuditError::Io)?;
+    file.sync_all().map_err(AuditError::Io)?;
+    File::open(path.parent().unwrap_or(Path::new(".")))
+        .and_then(|directory| directory.sync_all())
+        .map_err(AuditError::Io)
+}
+
+#[cfg(unix)]
+fn open_read_nofollow(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(unix)]
+fn open_write_nofollow(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_read_nofollow(path: &Path) -> std::io::Result<File> {
+    File::open(path)
+}
+
+#[cfg(not(unix))]
+fn open_write_nofollow(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new().write(true).open(path)
 }
 
 #[cfg(unix)]
@@ -440,6 +624,10 @@ impl AuditedPolicyStore {
 
     pub fn active_snapshot(&self) -> Option<&PolicySnapshot> {
         self.active_snapshot.as_ref()
+    }
+
+    pub fn close(&self) {
+        self.audit_log.close();
     }
 
     /// Validates and audits activation before atomically replacing the snapshot.

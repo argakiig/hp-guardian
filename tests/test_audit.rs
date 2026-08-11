@@ -95,6 +95,7 @@ fn separate_stores_never_reuse_an_authorization_correlation_id() {
     let mut first_store =
         AuditedPolicyStore::with_policy(POLICY, first_log).expect("activate policy");
     let first = first_store.authorize(&call()).expect("first authorization");
+    first_store.close();
 
     let second_log = AuditLog::new(&path, AuditLogConfig::default()).expect("valid audit config");
     let mut second_store =
@@ -253,9 +254,8 @@ fn invalid_or_unwritable_reload_keeps_the_previous_snapshot_active() {
         original_digest
     );
 
-    fs::remove_file(&path).expect("remove active log");
-    fs::remove_dir(path.parent().expect("parent")).expect("remove log directory");
-    assert!(matches!(store.reload(POLICY), Err(AuditError::Io(_))));
+    store.close();
+    assert!(matches!(store.reload(POLICY), Err(AuditError::Closed)));
     assert_eq!(
         store
             .active_snapshot()
@@ -271,9 +271,8 @@ fn required_authorization_write_failure_returns_no_decision() {
     let log = AuditLog::new(&path, AuditLogConfig::default()).expect("valid audit config");
     let mut store = AuditedPolicyStore::with_policy(POLICY, log).expect("activate policy");
 
-    fs::remove_file(&path).expect("remove active log");
-    fs::remove_dir(path.parent().expect("parent")).expect("remove log directory");
-    assert!(matches!(store.authorize(&call()), Err(AuditError::Io(_))));
+    store.close();
+    assert!(matches!(store.authorize(&call()), Err(AuditError::Closed)));
 }
 
 #[test]

@@ -154,6 +154,10 @@ impl InlineEnforcementAdapter {
         Self { store, now_unix_ms }
     }
 
+    pub fn close(&self) {
+        self.store.close();
+    }
+
     /// Validates, audits, and returns data for the host to execute only after an allow decision.
     pub fn authorize(
         &mut self,
