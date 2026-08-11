@@ -28,4 +28,6 @@ pub use simulator::{
     parse_trace, simulate_trace, ExpectedMetadata, PolicyIdentity, SimulationComparison,
     SimulationPolicy, SimulationReport, SimulationResult, TraceError, TraceEvent,
 };
-pub use state::{InMemoryRateLimitStore, RateLimitStore, RateLimitedPolicyStore, StateError};
+pub use state::{
+    InMemoryRateLimitStore, RateLimitKey, RateLimitStore, RateLimitedPolicyStore, StateError,
+};

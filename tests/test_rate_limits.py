@@ -47,3 +47,14 @@ def test_monotonic_clock_regression_fails_closed() -> None:
     with pytest.raises(StateError) as raised:
         store.resolve(PolicyCall(tool="search"))
     assert raised.value.code == "state_unavailable"
+
+
+def test_state_capacity_exhaustion_fails_closed() -> None:
+    store = RateLimitedPolicyStore(
+        POLICY, InMemoryRateLimitStore(max_keys=1), now_monotonic_seconds=lambda: 10
+    )
+    assert store.resolve(PolicyCall(agent="first", tool="search")).action.value == "allow"
+
+    with pytest.raises(StateError) as raised:
+        store.resolve(PolicyCall(agent="second", tool="search"))
+    assert raised.value.code == "state_unavailable"

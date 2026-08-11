@@ -81,3 +81,34 @@ fn monotonic_clock_regression_fails_closed() {
         "state_unavailable"
     );
 }
+
+#[test]
+fn state_capacity_exhaustion_fails_closed() {
+    let store = RateLimitedPolicyStore::with_clock(
+        POLICY,
+        Arc::new(InMemoryRateLimitStore::with_capacity(1).expect("capacity")),
+        Arc::new(|| 10),
+    )
+    .expect("policy");
+    assert_eq!(
+        store
+            .resolve(&PolicyCall {
+                agent: Some("first".into()),
+                ..search_call()
+            })
+            .expect("decision")
+            .action
+            .as_str(),
+        "allow"
+    );
+    assert_eq!(
+        store
+            .resolve(&PolicyCall {
+                agent: Some("second".into()),
+                ..search_call()
+            })
+            .expect_err("capacity exhausted")
+            .code(),
+        "state_unavailable"
+    );
+}

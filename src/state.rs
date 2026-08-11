@@ -29,11 +29,11 @@ impl Error for StateError {}
 /// Opaque identity for one policy rule and normalized call subject.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RateLimitKey {
-    policy_digest: String,
-    rule_index: usize,
-    agent: Option<String>,
-    user: Option<String>,
-    tool: Option<String>,
+    pub policy_digest: String,
+    pub rule_index: usize,
+    pub agent: Option<String>,
+    pub user: Option<String>,
+    pub tool: Option<String>,
 }
 
 /// Atomically consume a single fixed-window quota slot.
@@ -53,14 +53,33 @@ struct StateInner {
 }
 
 /// A process-local, locked fixed-window quota store.
-#[derive(Default)]
 pub struct InMemoryRateLimitStore {
     inner: Mutex<StateInner>,
+    max_keys: usize,
 }
 
 impl InMemoryRateLimitStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_capacity(max_keys: usize) -> Result<Self, StateError> {
+        if max_keys == 0 {
+            return Err(StateError);
+        }
+        Ok(Self {
+            inner: Mutex::new(StateInner::default()),
+            max_keys,
+        })
+    }
+}
+
+impl Default for InMemoryRateLimitStore {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(StateInner::default()),
+            max_keys: 10_000,
+        }
     }
 }
 
@@ -79,6 +98,9 @@ impl RateLimitStore for InMemoryRateLimitStore {
             return Err(StateError);
         }
         inner.last_now = Some(now_seconds);
+        if !inner.buckets.contains_key(key) && inner.buckets.len() >= self.max_keys {
+            return Err(StateError);
+        }
         let window_start = now_seconds - now_seconds % limit.window_seconds;
         let (previous_start, mut count) =
             inner.buckets.get(key).copied().unwrap_or((window_start, 0));

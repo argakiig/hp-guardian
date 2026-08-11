@@ -21,7 +21,7 @@ class StateError(Exception):
 
 
 @dataclass(frozen=True)
-class _RateLimitKey:
+class RateLimitKey:
     policy_digest: str
     rule_index: int
     agent: str | None
@@ -30,24 +30,29 @@ class _RateLimitKey:
 
 
 class RateLimitStore(Protocol):
-    def check_and_consume(self, key: _RateLimitKey, limit: RateLimit, now_seconds: int) -> bool: ...
+    def check_and_consume(self, key: RateLimitKey, limit: RateLimit, now_seconds: int) -> bool: ...
 
 
 class InMemoryRateLimitStore:
     """A process-local, locked fixed-window quota store."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_keys: int = 10_000) -> None:
+        if type(max_keys) is not int or max_keys < 1:
+            raise ValueError("max_keys must be a positive integer")
         self._lock = threading.Lock()
-        self._buckets: dict[_RateLimitKey, tuple[int, int]] = {}
+        self._max_keys = max_keys
+        self._buckets: dict[RateLimitKey, tuple[int, int]] = {}
         self._last_now: int | None = None
 
-    def check_and_consume(self, key: _RateLimitKey, limit: RateLimit, now_seconds: int) -> bool:
+    def check_and_consume(self, key: RateLimitKey, limit: RateLimit, now_seconds: int) -> bool:
         if type(now_seconds) is not int or now_seconds < 0:
             raise StateError("state_unavailable", "monotonic time must be a non-negative integer")
         with self._lock:
             if self._last_now is not None and now_seconds < self._last_now:
                 raise StateError("state_unavailable", "monotonic clock regressed")
             self._last_now = now_seconds
+            if key not in self._buckets and len(self._buckets) >= self._max_keys:
+                raise StateError("state_unavailable", "rate-limit state capacity is exhausted")
             window_start = now_seconds - now_seconds % limit.window_seconds
             previous_start, count = self._buckets.get(key, (window_start, 0))
             if previous_start != window_start:
@@ -82,7 +87,7 @@ class RateLimitedPolicyStore:
         limit = self._engine.rate_limits.get(selected_rule)
         if limit is None:
             return decision
-        key = _RateLimitKey(self._digest, selected_rule, call.agent, call.user, call.tool)
+        key = RateLimitKey(self._digest, selected_rule, call.agent, call.user, call.tool)
         if self._state_store.check_and_consume(key, limit, self._now()):
             return decision
         return Decision(action=Action.THROTTLE, matched_rules=decision.matched_rules)
