@@ -122,6 +122,17 @@ Trace events require `version: 1`, consecutive positive `sequence` values, and
 a normalized `call` object. The complete format, stable errors, and shared
 examples are defined in [Policy Simulator and Trace Format](spec/2026-08-11-policy-simulator-and-trace-format.md).
 
+## Inline enforcement
+
+The inline adapter validates a host request, rejects an expired deadline,
+writes the required authorization audit record, and returns data for the host
+to execute. It never invokes a tool itself. Only an `allow` response contains
+an effect; every other policy decision is terminal for this release.
+
+Requests require a caller ID, a retry-stable correlation ID, a Unix-millisecond
+deadline, and a normalized policy call. The complete API and error contract are
+defined in [Inline Enforcement Adapter](spec/2026-08-11-inline-enforcement-adapter.md).
+
 ## Verification
 
 ```bash
