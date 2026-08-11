@@ -308,6 +308,10 @@ struct AuditRecord {
     timestamp: DateTime<Utc>,
     event: AuditEvent,
     correlation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    caller_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deadline_unix_ms: Option<u64>,
     policy_version: i64,
     policy_digest: String,
     agent: Option<String>,
@@ -327,6 +331,8 @@ impl AuditRecord {
             timestamp,
             event: AuditEvent::Activation,
             correlation_id: None,
+            caller_id: None,
+            deadline_unix_ms: None,
             policy_version: snapshot.version,
             policy_digest: snapshot.digest.clone(),
             agent: None,
@@ -342,6 +348,8 @@ impl AuditRecord {
     fn authorization(
         snapshot: &PolicySnapshot,
         correlation_id: String,
+        caller_id: Option<String>,
+        deadline_unix_ms: Option<u64>,
         call: &PolicyCall,
         decision: &Decision,
         timestamp: DateTime<Utc>,
@@ -350,6 +358,8 @@ impl AuditRecord {
             timestamp,
             event: AuditEvent::Authorization,
             correlation_id: Some(correlation_id),
+            caller_id,
+            deadline_unix_ms,
             policy_version: snapshot.version,
             policy_digest: snapshot.digest.clone(),
             agent: call.agent.clone(),
@@ -372,6 +382,8 @@ impl AuditRecord {
             timestamp,
             event: AuditEvent::Outcome,
             correlation_id: Some(authorization.correlation_id.clone()),
+            caller_id: authorization.caller_id.clone(),
+            deadline_unix_ms: authorization.deadline_unix_ms,
             policy_version: authorization.snapshot.version,
             policy_digest: authorization.snapshot.digest.clone(),
             agent: authorization.agent.clone(),
@@ -395,6 +407,15 @@ pub struct Authorization {
     pub agent: Option<String>,
     pub tool: Option<String>,
     pub user: Option<String>,
+    caller_id: Option<String>,
+    deadline_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizationMetadata {
+    pub correlation_id: String,
+    pub caller_id: String,
+    pub deadline_unix_ms: u64,
 }
 
 /// Owns the active policy snapshot and its mandatory audit boundary.
@@ -432,15 +453,28 @@ impl AuditedPolicyStore {
 
     /// Resolves and durably records authorization before returning a decision.
     pub fn authorize(&mut self, call: &PolicyCall) -> Result<Authorization, AuditError> {
+        self.authorize_with_metadata(call, None)
+    }
+
+    pub(crate) fn authorize_with_metadata(
+        &mut self,
+        call: &PolicyCall,
+        metadata: Option<AuthorizationMetadata>,
+    ) -> Result<Authorization, AuditError> {
         let snapshot = self
             .active_snapshot
             .as_ref()
             .ok_or(AuditError::NoActivePolicy)?;
         let decision = snapshot.engine.resolve_call(call);
-        let correlation_id = next_correlation_id();
+        let correlation_id = metadata
+            .as_ref()
+            .map(|metadata| metadata.correlation_id.clone())
+            .unwrap_or_else(next_correlation_id);
         let record = AuditRecord::authorization(
             snapshot,
             correlation_id.clone(),
+            metadata.as_ref().map(|metadata| metadata.caller_id.clone()),
+            metadata.as_ref().map(|metadata| metadata.deadline_unix_ms),
             call,
             &decision,
             (self.audit_log.now)(),
@@ -454,6 +488,8 @@ impl AuditedPolicyStore {
             agent: call.agent.clone(),
             tool: call.tool.clone(),
             user: call.user.clone(),
+            caller_id: metadata.as_ref().map(|metadata| metadata.caller_id.clone()),
+            deadline_unix_ms: metadata.as_ref().map(|metadata| metadata.deadline_unix_ms),
         })
     }
 

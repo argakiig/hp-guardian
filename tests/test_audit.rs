@@ -78,6 +78,8 @@ fn authorization_is_persisted_without_raw_call_data_before_returning_decision() 
     assert_eq!(record["user"], "operator");
     assert_eq!(record["decision"], "deny");
     assert_eq!(record["matched_rules"], serde_json::json!([0]));
+    assert!(record.get("caller_id").is_none());
+    assert!(record.get("deadline_unix_ms").is_none());
     assert!(record.get("args").is_none());
     assert!(record.get("context").is_none());
     assert!(record.get("outcome_status").is_none());

@@ -1,3 +1,4 @@
+pub mod adapter;
 pub mod audit;
 pub mod conditions;
 pub mod engine;
@@ -8,6 +9,10 @@ pub mod parser;
 pub mod simulator;
 
 // Re-export key types for convenience.
+pub use adapter::{
+    AdapterError, EffectCall, EffectRequest, EnforcementRequest, EnforcementResponse,
+    InlineEnforcementAdapter,
+};
 pub use audit::{
     AuditError, AuditLog, AuditLogConfig, AuditedPolicyStore, Authorization, OutcomeStatus,
     PolicySnapshot,
