@@ -16,8 +16,11 @@ time windows, while preserving existing leaf-condition behavior.
 - `all: []` is true; `any: []` is false; `not` without one operand is invalid.
 - A `time_window` leaf contains exactly `start` and `end`, both RFC 3339 UTC
   timestamps ending in `Z`. `end` must be later than `start`.
-- A window matches when `start <= now < end`. The engine uses an injected UTC
-  clock for tests and the current UTC clock in production.
+- A window matches when `start <= now < end`. The engine samples one UTC instant
+  per decision; `resolve_call_at` accepts that instant explicitly for hosts and
+  tests, while `resolve_call` uses the local current UTC clock. The language
+  does not compensate for host/agent clock skew or provide a trusted-time
+  source.
 - A rule has at most 32 nested condition levels and 128 total condition nodes.
   Invalid shapes, unknown fields, invalid timestamps, non-UTC offsets,
   excessive depth, and excessive nodes return stable policy errors.
@@ -47,15 +50,17 @@ if "all" in condition:
 ## Testing Strategy
 
 Add shared fixtures for boolean truth tables, compatibility leaves, empty
-operators, nesting/node limits, UTC boundary instants, invalid offsets, and
-malformed windows. Test both runtimes under an injected clock.
+operators, temporal negation, nesting/node limits, UTC boundary instants,
+invalid offsets, and malformed windows. Test both runtimes under an injected
+clock.
 
 ## Boundaries
 
 - **Always:** preserve existing leaf behavior, validate the full AST before
   evaluation, use UTC, and bound depth/node count.
 - **Ask first:** recurring schedules, local timezones, offset-bearing times,
-  relative time, stateful predicates, or new leaf conditions.
+  relative time, trusted or distributed clock sources, stateful predicates, or
+  new leaf conditions.
 - **Never:** evaluate host-language code, depend on locale time, or silently
   accept an invalid condition as non-matching.
 

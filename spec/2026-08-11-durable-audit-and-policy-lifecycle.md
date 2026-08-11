@@ -25,6 +25,18 @@ and activates policy changes only through an explicit validated reload.
   Raw arguments and context are omitted by default.
 - Records append to a host-local file with owner-only permissions where the OS
   supports them. Rotation is configurable by maximum bytes and maximum age.
+- One `AuditLog` writer owns each audit path. The runtimes serialize calls
+  through one in-process store/log instance, but do not coordinate independent
+  stores or processes that point at the same file.
+- Each successful append is synced before authorization returns. This is not a
+  write-ahead log: abrupt process or power loss can leave a torn final JSONL
+  record, and multi-file rotation is not crash-transactional. Consumers that
+  require crash recovery, tamper evidence, or shared writers need a separate
+  durable-log service or an explicitly designed recovery protocol.
+- On Unix-like systems, writers reject symlink/non-regular audit paths and
+  create files with mode `0600`. On platforms without equivalent no-follow or
+  owner-mode facilities, the audit boundary has only the platform's ordinary
+  filesystem protections.
 - The initial release relies on filesystem permissions, not encryption at rest
   or signed policy artifacts.
 
@@ -49,7 +61,9 @@ make check
 
 Test authorization-before-return, raw-data omission, snapshot rollback on
 invalid reload or audit failure, outcome correlation, digest equality, and
-size/age rotation. Run equivalent JSON-shape fixtures in both runtimes.
+size/age rotation. Exercise adapter authorization through the real audit file
+and assert that its returned policy identity and decision match the persisted
+authorization record. Run equivalent JSON-shape fixtures in both runtimes.
 
 ## Boundaries
 
