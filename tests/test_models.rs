@@ -1,6 +1,6 @@
 //! Test suite mirroring the Python hp_guard tests — models.
 
-use hp_guard::models::{Action, PolicyCall, Rule};
+use hp_guard::models::{Action, Condition, PolicyCall, Rule};
 
 #[test]
 fn test_rule_has_action_and_target() {
@@ -48,7 +48,7 @@ fn test_rule_has_empty_condition_by_default() {
         condition: Default::default(),
         rule_index: 0,
     };
-    assert!(rule.condition.is_empty());
+    assert!(matches!(rule.condition, Condition::Leaves { .. }));
 }
 
 #[test]
@@ -64,15 +64,23 @@ fn test_rule_has_rule_index_zero_by_default() {
 
 #[test]
 fn test_rule_stores_condition() {
-    let mut cond = std::collections::BTreeMap::<String, String>::new();
-    cond.insert("args_match".into(), ".*--delete.*".into());
     let rule = Rule {
         action: Action::Deny,
         target: Default::default(),
-        condition: cond,
+        condition: Condition::Leaves {
+            args_match: Some(".*--delete.*".into()),
+            path_pattern: None,
+            time_window: None,
+        },
         rule_index: 0,
     };
-    assert_eq!(rule.condition.get("args_match").unwrap(), ".*--delete.*");
+    assert!(matches!(
+        rule.condition,
+        Condition::Leaves {
+            args_match: Some(ref pattern),
+            ..
+        } if pattern == ".*--delete.*"
+    ));
 }
 
 #[test]

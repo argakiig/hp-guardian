@@ -1,9 +1,12 @@
 use crate::conditions::validate_args_match as validate_portable_args_match;
-use crate::models::{Action, PolicyError, Rule};
+use crate::models::{Action, Condition, PolicyError, Rule, TimeWindow};
 use crate::Engine;
+use chrono::{DateTime, Utc};
 use std::collections::{BTreeMap, BTreeSet};
 
 const SUPPORTED_VERSION: i64 = 1;
+const MAX_CONDITION_DEPTH: usize = 32;
+const MAX_CONDITION_NODES: usize = 128;
 
 /// Parses YAML policy strings into an Engine.
 pub struct PolicyParser;
@@ -331,17 +334,81 @@ fn add_enclosing_target(
     }
 }
 
-fn parse_conditions(
-    condition: Option<&serde_yaml::Value>,
-) -> Result<BTreeMap<String, String>, PolicyError> {
-    let mut parsed = BTreeMap::new();
+fn parse_conditions(condition: Option<&serde_yaml::Value>) -> Result<Condition, PolicyError> {
     let Some(condition) = condition else {
-        return Ok(parsed);
+        return Ok(Condition::default());
     };
+
+    let mut nodes = 0;
+    parse_condition(condition, 1, &mut nodes)
+}
+
+fn parse_condition(
+    condition: &serde_yaml::Value,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<Condition, PolicyError> {
+    if depth > MAX_CONDITION_DEPTH {
+        return Err(PolicyError::InvalidCondition {
+            condition: "condition nesting exceeds 32 levels".to_owned(),
+        });
+    }
+    *nodes += 1;
+    if *nodes > MAX_CONDITION_NODES {
+        return Err(PolicyError::InvalidCondition {
+            condition: "condition tree exceeds 128 nodes".to_owned(),
+        });
+    }
 
     let fields = mapping(condition, "condition").map_err(|_| PolicyError::InvalidCondition {
         condition: "condition".to_owned(),
     })?;
+
+    let boolean_operator = fields.keys().find_map(|key| {
+        key.as_str()
+            .filter(|key| matches!(*key, "all" | "any" | "not"))
+    });
+    if let Some(operator) = boolean_operator {
+        if fields.len() != 1 {
+            return Err(PolicyError::InvalidCondition {
+                condition: operator.to_owned(),
+            });
+        }
+        let value = fields
+            .iter()
+            .next()
+            .map(|(_, value)| value)
+            .expect("single condition field is present");
+        return match operator {
+            "all" | "any" => {
+                let children =
+                    value
+                        .as_sequence()
+                        .ok_or_else(|| PolicyError::InvalidCondition {
+                            condition: operator.to_owned(),
+                        })?;
+                let children = children
+                    .iter()
+                    .map(|child| parse_condition(child, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(if operator == "all" {
+                    Condition::All(children)
+                } else {
+                    Condition::Any(children)
+                })
+            }
+            "not" => Ok(Condition::Not(Box::new(parse_condition(
+                value,
+                depth + 1,
+                nodes,
+            )?))),
+            _ => unreachable!("boolean operators are filtered above"),
+        };
+    }
+
+    let mut args_match = None;
+    let mut path_pattern = None;
+    let mut time_window = None;
     for (key, value) in fields {
         let key = field_name(key, "condition").map_err(|_| PolicyError::InvalidCondition {
             condition: "condition".to_owned(),
@@ -359,7 +426,7 @@ fn parse_conditions(
                     });
                 }
                 validate_args_match(value)?;
-                parsed.insert(key.to_owned(), value.to_owned());
+                args_match = Some(value.to_owned());
             }
             "path_pattern" => {
                 let value = value
@@ -372,7 +439,10 @@ fn parse_conditions(
                         condition: key.to_owned(),
                     });
                 }
-                parsed.insert(key.to_owned(), value.to_owned());
+                path_pattern = Some(value.to_owned());
+            }
+            "time_window" => {
+                time_window = Some(parse_time_window(value)?);
             }
             _ => {
                 return Err(PolicyError::InvalidCondition {
@@ -382,7 +452,68 @@ fn parse_conditions(
         }
     }
 
-    Ok(parsed)
+    Ok(Condition::Leaves {
+        args_match,
+        path_pattern,
+        time_window,
+    })
+}
+
+fn parse_time_window(value: &serde_yaml::Value) -> Result<TimeWindow, PolicyError> {
+    let fields = mapping(value, "time_window").map_err(|_| PolicyError::InvalidCondition {
+        condition: "time_window".to_owned(),
+    })?;
+    if fields.len() != 2 {
+        return Err(PolicyError::InvalidCondition {
+            condition: "time_window".to_owned(),
+        });
+    }
+
+    let mut start = None;
+    let mut end = None;
+    for (field, value) in fields {
+        let field =
+            field_name(field, "time_window").map_err(|_| PolicyError::InvalidCondition {
+                condition: "time_window".to_owned(),
+            })?;
+        let timestamp = value
+            .as_str()
+            .ok_or_else(|| PolicyError::InvalidCondition {
+                condition: "time_window".to_owned(),
+            })?;
+        match field {
+            "start" => start = Some(parse_utc_timestamp(timestamp)?),
+            "end" => end = Some(parse_utc_timestamp(timestamp)?),
+            _ => {
+                return Err(PolicyError::InvalidCondition {
+                    condition: "time_window".to_owned(),
+                });
+            }
+        }
+    }
+
+    let (start, end) = match (start, end) {
+        (Some(start), Some(end)) if end > start => (start, end),
+        _ => {
+            return Err(PolicyError::InvalidCondition {
+                condition: "time_window".to_owned(),
+            });
+        }
+    };
+    Ok(TimeWindow { start, end })
+}
+
+fn parse_utc_timestamp(timestamp: &str) -> Result<DateTime<Utc>, PolicyError> {
+    if !timestamp.ends_with('Z') {
+        return Err(PolicyError::InvalidCondition {
+            condition: "time_window".to_owned(),
+        });
+    }
+    DateTime::parse_from_rfc3339(timestamp)
+        .map(|time| time.with_timezone(&Utc))
+        .map_err(|_| PolicyError::InvalidCondition {
+            condition: "time_window".to_owned(),
+        })
 }
 
 fn validate_args_match(pattern: &str) -> Result<(), PolicyError> {

@@ -110,8 +110,38 @@ impl Error for PolicyError {
 pub struct Rule {
     pub action: Action,
     pub target: BTreeMap<String, String>,
-    pub condition: BTreeMap<String, String>,
+    pub condition: Condition,
     pub rule_index: usize,
+}
+
+/// A bounded, declarative condition tree attached to a policy rule.
+#[derive(Debug, Clone)]
+pub enum Condition {
+    Leaves {
+        args_match: Option<String>,
+        path_pattern: Option<String>,
+        time_window: Option<TimeWindow>,
+    },
+    All(Vec<Condition>),
+    Any(Vec<Condition>),
+    Not(Box<Condition>),
+}
+
+impl Default for Condition {
+    fn default() -> Self {
+        Self::Leaves {
+            args_match: None,
+            path_pattern: None,
+            time_window: None,
+        }
+    }
+}
+
+/// An absolute UTC interval, inclusive at the start and exclusive at the end.
+#[derive(Debug, Clone)]
+pub struct TimeWindow {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
 }
 
 /// A tool call that the engine evaluates against policy rules.

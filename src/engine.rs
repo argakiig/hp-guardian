@@ -1,6 +1,7 @@
-use crate::conditions::evaluate;
+use crate::conditions::evaluate_at;
 use crate::matching::rule_matches_rule;
 use crate::models::{Action, Decision, PolicyCall, Rule};
+use chrono::{DateTime, Utc};
 
 fn rule_specificity(rule: &Rule) -> usize {
     rule.target.len()
@@ -37,10 +38,15 @@ impl Engine {
     }
 
     pub fn resolve_call(&self, call: &PolicyCall) -> Decision {
+        self.resolve_call_at(call, Utc::now())
+    }
+
+    /// Resolve a call at an explicit UTC instant for deterministic evaluation.
+    pub fn resolve_call_at(&self, call: &PolicyCall, now: DateTime<Utc>) -> Decision {
         let matching: Vec<&Rule> = self
             .rules
             .iter()
-            .filter(|r| rule_matches_rule(r, call) && evaluate(r, call))
+            .filter(|r| rule_matches_rule(r, call) && evaluate_at(r, call, now))
             .collect();
 
         if matching.is_empty() {

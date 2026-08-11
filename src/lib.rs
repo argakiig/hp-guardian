@@ -19,7 +19,9 @@ pub use audit::{
 };
 pub use engine::Engine;
 pub use logging::AuditLogger;
-pub use models::{Action, AuditEntry, Decision, PolicyCall, PolicyError, Rule};
+pub use models::{
+    Action, AuditEntry, Condition, Decision, PolicyCall, PolicyError, Rule, TimeWindow,
+};
 pub use parser::PolicyParser;
 pub use simulator::{
     parse_trace, simulate_trace, ExpectedMetadata, PolicyIdentity, SimulationComparison,

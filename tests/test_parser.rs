@@ -1,4 +1,4 @@
-use hp_guard::models::PolicyCall;
+use hp_guard::models::{Condition, PolicyCall};
 use hp_guard::parser::PolicyParser;
 use hp_guard::Action;
 
@@ -78,7 +78,10 @@ agents:
           - action: deny
 "#;
     let engine = PolicyParser::parse(yaml).expect("policy is valid");
-    assert_eq!(engine.rules[0].condition.len(), 0);
+    assert!(matches!(
+        engine.rules[0].condition,
+        Condition::Leaves { .. }
+    ));
 }
 
 #[test]

@@ -1,4 +1,5 @@
-use crate::models::{PolicyCall, Rule};
+use crate::models::{Condition, PolicyCall, Rule};
+use chrono::{DateTime, Utc};
 
 #[derive(Clone, Copy)]
 enum TokenKind {
@@ -34,26 +35,41 @@ pub(crate) fn validate_args_match(pattern: &str) -> Result<(), String> {
 
 /// Evaluate all conditions on a rule against a call. All conditions must pass (ANDed).
 pub fn evaluate(rule: &Rule, call: &PolicyCall) -> bool {
-    for (key, value) in &rule.condition {
-        match key.as_str() {
-            "args_match" => {
-                if !args_match(&call.args.join(" "), value) {
-                    return false;
-                }
-            }
-            "path_pattern" => {
-                if !call
-                    .args
-                    .iter()
-                    .any(|argument| path_matches(value, argument))
-                {
-                    return false;
-                }
-            }
-            _ => return false,
+    evaluate_at(rule, call, Utc::now())
+}
+
+/// Evaluate all conditions on a rule at an explicit UTC instant.
+pub fn evaluate_at(rule: &Rule, call: &PolicyCall, now: DateTime<Utc>) -> bool {
+    evaluate_condition(&rule.condition, call, now)
+}
+
+fn evaluate_condition(condition: &Condition, call: &PolicyCall, now: DateTime<Utc>) -> bool {
+    match condition {
+        Condition::Leaves {
+            args_match: args_pattern,
+            path_pattern,
+            time_window,
+        } => {
+            args_pattern
+                .as_ref()
+                .is_none_or(|pattern| args_match(&call.args.join(" "), pattern))
+                && path_pattern.as_ref().is_none_or(|pattern| {
+                    call.args
+                        .iter()
+                        .any(|argument| path_matches(pattern, argument))
+                })
+                && time_window
+                    .as_ref()
+                    .is_none_or(|window| window.start <= now && now < window.end)
         }
+        Condition::All(children) => children
+            .iter()
+            .all(|child| evaluate_condition(child, call, now)),
+        Condition::Any(children) => children
+            .iter()
+            .any(|child| evaluate_condition(child, call, now)),
+        Condition::Not(child) => !evaluate_condition(child, call, now),
     }
-    true
 }
 
 fn args_match(text: &str, pattern: &str) -> bool {
