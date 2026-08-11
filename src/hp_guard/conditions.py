@@ -1,22 +1,67 @@
 from __future__ import annotations
+from datetime import datetime, timezone
 from functools import lru_cache
+import re
+from collections.abc import Mapping
+from typing import Any
 
 from .models import Rule, PolicyCall
 
 
-def evaluate(rule: Rule, call: PolicyCall) -> bool:
-    """Evaluate all conditions on a rule against a call. All conditions must pass (ANDed)."""
-    for key, value in rule.condition.items():
+_UTC_TIMESTAMP = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"
+)
+
+
+def evaluate(rule: Rule, call: PolicyCall, now: datetime | None = None) -> bool:
+    """Evaluate a validated condition tree against a call at one UTC instant."""
+    return _evaluate_condition(rule.condition, call, now or datetime.now(timezone.utc))
+
+
+def _evaluate_condition(condition: Mapping[str, Any], call: PolicyCall, now: datetime) -> bool:
+    if "all" in condition:
+        return all(_evaluate_condition(child, call, now) for child in condition["all"])
+    if "any" in condition:
+        return any(_evaluate_condition(child, call, now) for child in condition["any"])
+    if "not" in condition:
+        return not _evaluate_condition(condition["not"], call, now)
+
+    for key, value in condition.items():
         if key == "args_match":
             if not args_match(call.args, value):
                 return False
         elif key == "path_pattern":
             if not any(path_matches(value, argument) for argument in call.args):
                 return False
+        elif key == "time_window":
+            start, end = parse_time_window(value)
+            if not start <= now < end:
+                return False
         else:
             # Unknown condition keys cause the rule to NOT match
             return False
     return True
+
+
+def parse_time_window(value: Any) -> tuple[datetime, datetime]:
+    """Validate and parse a closed UTC time-window definition."""
+    if not isinstance(value, Mapping) or set(value) != {"start", "end"}:
+        raise ValueError("time_window must contain exactly start and end")
+    start = parse_utc_timestamp(value["start"])
+    end = parse_utc_timestamp(value["end"])
+    if end <= start:
+        raise ValueError("time_window.end must be later than time_window.start")
+    return start, end
+
+
+def parse_utc_timestamp(value: Any) -> datetime:
+    """Parse the policy's intentionally narrow RFC 3339 UTC timestamp subset."""
+    if not isinstance(value, str) or not _UTC_TIMESTAMP.fullmatch(value):
+        raise ValueError("timestamp must be RFC 3339 UTC and end in Z")
+    try:
+        return datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as error:
+        raise ValueError("timestamp must be a valid RFC 3339 UTC instant") from error
 
 
 def args_match(args: list, pattern: str) -> bool:

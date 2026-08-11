@@ -7,14 +7,18 @@ from typing import Any
 import yaml
 
 from .engine import Engine
-from .conditions import validate_args_pattern
+from .conditions import parse_time_window, validate_args_pattern
 from .models import Action, PolicyError, Rule
 
 
 _ACTIONS = {action.value: action for action in Action}
 _RULE_FIELDS = {"id", "action", "target", "condition"}
 _TARGET_FIELDS = {"agent", "tool", "user", "context"}
-_CONDITION_FIELDS = {"args_match", "path_pattern"}
+_CONDITION_LEAF_FIELDS = {"args_match", "path_pattern", "time_window"}
+_CONDITION_OPERATOR_FIELDS = {"all", "any", "not"}
+_CONDITION_FIELDS = _CONDITION_LEAF_FIELDS | _CONDITION_OPERATOR_FIELDS
+_MAX_CONDITION_DEPTH = 32
+_MAX_CONDITION_NODES = 128
 _YAML_BOOL_TAG = "tag:yaml.org,2002:bool"
 _YAML_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 _AMBIGUOUS_SCALAR_PATTERNS = (
@@ -167,14 +171,53 @@ def _parse_target(value: Any) -> dict[str, str]:
     return parsed
 
 
-def _parse_condition(value: Any) -> dict[str, str]:
+def _parse_condition(value: Any) -> dict[str, Any]:
+    return _parse_condition_node(value, depth=1, node_count=[0])
+
+
+def _parse_condition_node(value: Any, *, depth: int, node_count: list[int]) -> dict[str, Any]:
     condition = _mapping(value, "condition", "invalid_condition")
     _reject_unknown_fields(condition, _CONDITION_FIELDS, "condition", "invalid_condition")
-    parsed: dict[str, str] = {}
+    node_count[0] += 1
+    if depth > _MAX_CONDITION_DEPTH:
+        raise PolicyError("invalid_condition", "condition nesting exceeds 32 levels")
+    if node_count[0] > _MAX_CONDITION_NODES:
+        raise PolicyError("invalid_condition", "condition contains more than 128 nodes")
+
+    operators = _CONDITION_OPERATOR_FIELDS.intersection(condition)
+    if operators:
+        if len(operators) != 1 or len(condition) != 1:
+            raise PolicyError(
+                "invalid_condition",
+                "a boolean condition must contain exactly one operator",
+            )
+        operator = next(iter(operators))
+        operand = condition[operator]
+        if operator in {"all", "any"}:
+            if isinstance(operand, (str, bytes)) or not isinstance(operand, Sequence):
+                raise PolicyError("invalid_condition", f"condition.{operator} must be a sequence")
+            return {
+                operator: [
+                    _parse_condition_node(child, depth=depth + 1, node_count=node_count)
+                    for child in operand
+                ]
+            }
+        return {
+            "not": _parse_condition_node(operand, depth=depth + 1, node_count=node_count)
+        }
+
+    parsed: dict[str, Any] = {}
     for key, value in condition.items():
-        value = _unambiguous_string(value, f"condition.{key}", "invalid_condition")
         if key == "args_match":
+            value = _unambiguous_string(value, f"condition.{key}", "invalid_condition")
             _validate_portable_regex(value)
+        elif key == "path_pattern":
+            value = _unambiguous_string(value, f"condition.{key}", "invalid_condition")
+        else:
+            try:
+                parse_time_window(value)
+            except ValueError as error:
+                raise PolicyError("invalid_condition", f"invalid time_window: {error}") from error
         parsed[key] = value
     return parsed
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from .models import Rule, PolicyCall, Action
 from .matching import rule_matches_rule
 from .conditions import evaluate
@@ -31,9 +32,13 @@ class Engine:
         self.default_action = default_action
 
     def resolve_call(self, call: PolicyCall) -> Decision:
+        return self.resolve_call_at(call, datetime.now(timezone.utc))
+
+    def resolve_call_at(self, call: PolicyCall, now: datetime) -> Decision:
+        """Resolve a call at an explicit UTC instant for deterministic evaluation."""
         matching = [
             r for r in self.rules
-            if rule_matches_rule(r, call) and evaluate(r, call)
+            if rule_matches_rule(r, call) and evaluate(r, call, now)
         ]
         if not matching:
             return Decision(action=self.default_action)
