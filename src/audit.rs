@@ -1,7 +1,7 @@
 use crate::models::{Action, Decision, PolicyCall, PolicyError};
 use crate::{Engine, PolicyParser};
 use chrono::{DateTime, Duration, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -141,6 +141,22 @@ pub struct AuditLog {
     closed: AtomicBool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RotationManifest {
+    format_version: u8,
+    transaction_id: String,
+    max_rotated_files: usize,
+    operation: String,
+    phase: String,
+    present: RotationPresent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RotationPresent {
+    active: bool,
+    backups: Vec<usize>,
+}
+
 impl AuditLog {
     pub fn new(path: impl Into<PathBuf>, config: AuditLogConfig) -> Result<Self, AuditError> {
         Self::with_clock(path, config, Arc::new(Utc::now))
@@ -207,21 +223,23 @@ impl AuditLog {
 
     fn recover_tails(&self) -> Result<(), AuditError> {
         let manifest = PathBuf::from(format!("{}.rotation.json", self.path.display()));
-        if manifest.exists()
-            || self
-                .path
-                .parent()
-                .unwrap_or(Path::new("."))
-                .read_dir()
-                .map_err(AuditError::Io)?
-                .any(|entry| {
-                    entry.ok().is_some_and(|entry| {
-                        entry.file_name().to_string_lossy().starts_with(&format!(
-                            "{}.rotation.",
-                            self.path.file_name().unwrap().to_string_lossy()
-                        ))
-                    })
+        if manifest.exists() {
+            self.recover_manifest(&manifest)?;
+        }
+        if self
+            .path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .read_dir()
+            .map_err(AuditError::Io)?
+            .any(|entry| {
+                entry.ok().is_some_and(|entry| {
+                    entry.file_name().to_string_lossy().starts_with(&format!(
+                        "{}.rotation.",
+                        self.path.file_name().unwrap().to_string_lossy()
+                    ))
                 })
+            })
         {
             return Err(AuditError::RecoveryFailed);
         }
@@ -235,6 +253,155 @@ impl AuditLog {
             }
         }
         Ok(())
+    }
+
+    fn recover_manifest(&self, manifest_path: &Path) -> Result<(), AuditError> {
+        let manifest: RotationManifest =
+            serde_json::from_slice(&fs::read(manifest_path).map_err(AuditError::Io)?)
+                .map_err(|_| AuditError::RecoveryFailed)?;
+        if manifest.format_version != 1
+            || manifest.operation != "rotate"
+            || !matches!(manifest.phase.as_str(), "staging" | "installing")
+            || !manifest.present.active
+            || manifest.max_rotated_files == 0
+            || !manifest
+                .transaction_id
+                .replace('-', "")
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric())
+            || manifest
+                .present
+                .backups
+                .iter()
+                .any(|index| *index == 0 || *index > manifest.max_rotated_files)
+        {
+            return Err(AuditError::RecoveryFailed);
+        }
+        let mut backups = manifest.present.backups.clone();
+        backups.sort_unstable();
+        backups.dedup();
+        if backups != manifest.present.backups {
+            return Err(AuditError::RecoveryFailed);
+        }
+
+        if manifest.phase == "staging" {
+            self.stage_slot(&manifest.transaction_id, "active", true)?;
+            for index in 1..=manifest.max_rotated_files {
+                self.stage_slot(
+                    &manifest.transaction_id,
+                    &format!("backup_{index}"),
+                    backups.contains(&index),
+                )?;
+            }
+            let mut installing = manifest.clone();
+            installing.phase = "installing".into();
+            self.write_manifest(manifest_path, &installing)?;
+        }
+        for index in 1..=manifest.max_rotated_files {
+            let source = if index == 1 {
+                "active".to_string()
+            } else {
+                format!("backup_{}", index - 1)
+            };
+            let expected = source == "active" || backups.contains(&source[7..].parse().unwrap());
+            self.install_slot(&manifest.transaction_id, &source, index, expected)?;
+        }
+        let oldest = self.staging_path(
+            &manifest.transaction_id,
+            &format!("backup_{}", manifest.max_rotated_files),
+        );
+        if regular_exists(&oldest)? {
+            fs::remove_file(oldest).map_err(AuditError::Io)?;
+            sync_parent(&self.path).map_err(AuditError::Io)?;
+        }
+        fs::remove_file(manifest_path).map_err(AuditError::Io)?;
+        sync_parent(&self.path).map_err(AuditError::Io)
+    }
+
+    fn stage_slot(&self, transaction: &str, slot: &str, expected: bool) -> Result<(), AuditError> {
+        let source = if slot == "active" {
+            self.path.clone()
+        } else {
+            self.backup_path(slot[7..].parse().unwrap())
+        };
+        let stage = self.staging_path(transaction, slot);
+        let source_exists = regular_exists(&source)?;
+        let stage_exists = regular_exists(&stage)?;
+        if !expected {
+            return if source_exists || stage_exists {
+                Err(AuditError::RecoveryFailed)
+            } else {
+                Ok(())
+            };
+        }
+        if source_exists && stage_exists {
+            return Err(AuditError::RecoveryFailed);
+        }
+        if source_exists {
+            fs::rename(source, stage).map_err(AuditError::Io)?;
+            sync_parent(&self.path).map_err(AuditError::Io)
+        } else if stage_exists {
+            Ok(())
+        } else {
+            Err(AuditError::RecoveryFailed)
+        }
+    }
+
+    fn install_slot(
+        &self,
+        transaction: &str,
+        source: &str,
+        target_index: usize,
+        expected: bool,
+    ) -> Result<(), AuditError> {
+        let stage = self.staging_path(transaction, source);
+        let target = self.backup_path(target_index);
+        let stage_exists = regular_exists(&stage)?;
+        let target_exists = regular_exists(&target)?;
+        if !expected {
+            return if stage_exists || target_exists {
+                Err(AuditError::RecoveryFailed)
+            } else {
+                Ok(())
+            };
+        }
+        if stage_exists && target_exists {
+            return Err(AuditError::RecoveryFailed);
+        }
+        if stage_exists {
+            fs::rename(stage, target).map_err(AuditError::Io)?;
+            sync_parent(&self.path).map_err(AuditError::Io)
+        } else if target_exists {
+            Ok(())
+        } else {
+            Err(AuditError::RecoveryFailed)
+        }
+    }
+
+    fn staging_path(&self, transaction: &str, slot: &str) -> PathBuf {
+        let suffix = if slot == "active" {
+            "active".into()
+        } else {
+            format!("backup.{}", &slot[7..])
+        };
+        PathBuf::from(format!(
+            "{}.rotation.{transaction}.{suffix}",
+            self.path.display()
+        ))
+    }
+
+    fn write_manifest(&self, path: &Path, manifest: &RotationManifest) -> Result<(), AuditError> {
+        let temporary = PathBuf::from(format!(
+            "{}.tmp.{}",
+            path.display(),
+            manifest.transaction_id
+        ));
+        let mut file = open_append(&temporary).map_err(AuditError::Io)?;
+        file.write_all(&serde_json::to_vec(manifest).map_err(AuditError::Serialization)?)
+            .map_err(AuditError::Io)?;
+        file.sync_all().map_err(AuditError::Io)?;
+        fs::rename(temporary, path).map_err(AuditError::Io)?;
+        sync_parent(&self.path).map_err(AuditError::Io)
     }
 
     fn rotate_before_append(&self, next_record_bytes: u64) -> Result<(), AuditError> {
@@ -291,22 +458,28 @@ impl AuditLog {
     }
 
     fn rotate_current(&self) -> Result<(), AuditError> {
-        validate_regular_or_absent(&self.path).map_err(AuditError::Io)?;
-        for index in 1..=self.config.max_rotated_files {
-            validate_regular_or_absent(&self.backup_path(index)).map_err(AuditError::Io)?;
-        }
-
-        let oldest = self.backup_path(self.config.max_rotated_files);
-        if oldest.exists() {
-            fs::remove_file(&oldest).map_err(AuditError::Io)?;
-        }
-        for index in (1..self.config.max_rotated_files).rev() {
-            let source = self.backup_path(index);
-            if source.exists() {
-                fs::rename(source, self.backup_path(index + 1)).map_err(AuditError::Io)?;
-            }
-        }
-        fs::rename(&self.path, self.backup_path(1)).map_err(AuditError::Io)
+        let manifest_path = PathBuf::from(format!("{}.rotation.json", self.path.display()));
+        let manifest = RotationManifest {
+            format_version: 1,
+            transaction_id: format!(
+                "{:x}",
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ),
+            max_rotated_files: self.config.max_rotated_files,
+            operation: "rotate".into(),
+            phase: "staging".into(),
+            present: RotationPresent {
+                active: true,
+                backups: (1..=self.config.max_rotated_files)
+                    .filter(|i| regular_exists(&self.backup_path(*i)).unwrap_or(false))
+                    .collect(),
+            },
+        };
+        self.write_manifest(&manifest_path, &manifest)?;
+        self.recover_manifest(&manifest_path)
     }
 
     fn backup_path(&self, index: usize) -> PathBuf {
@@ -398,7 +571,7 @@ fn recover_tail(path: &Path) -> Result<(), AuditError> {
     if serde_json::from_str::<serde_json::Value>(tail_text).is_ok() {
         return Err(AuditError::Corrupt);
     }
-    let mut file = open_write_nofollow(path).map_err(AuditError::Io)?;
+    let file = open_write_nofollow(path).map_err(AuditError::Io)?;
     file.set_len(complete_end as u64).map_err(AuditError::Io)?;
     file.sync_all().map_err(AuditError::Io)?;
     File::open(path.parent().unwrap_or(Path::new(".")))
@@ -466,6 +639,19 @@ fn validate_regular_or_absent(path: &Path) -> std::io::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+fn regular_exists(path: &Path) -> Result<bool, AuditError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(true),
+        Ok(_) => Err(AuditError::RecoveryFailed),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(AuditError::Io(error)),
+    }
+}
+
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+    File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
 }
 
 #[cfg(unix)]

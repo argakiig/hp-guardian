@@ -199,7 +199,10 @@ fn audit_log_rejects_a_non_regular_rotated_entry() {
     let mut store = AuditedPolicyStore::with_policy(POLICY, log).expect("activate policy");
     fs::create_dir(path.with_extension("jsonl.1")).expect("create rotated directory");
 
-    assert!(matches!(store.authorize(&call()), Err(AuditError::Io(_))));
+    assert!(matches!(
+        store.authorize(&call()),
+        Err(AuditError::RecoveryFailed)
+    ));
     assert!(path.with_extension("jsonl.1").is_dir());
 }
 
