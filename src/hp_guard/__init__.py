@@ -18,7 +18,13 @@ from hp_guard.adapter import (
     EnforcementResponse,
     InlineEnforcementAdapter,
 )
-from hp_guard.state import InMemoryRateLimitStore, RateLimitKey, RateLimitedPolicyStore, StateError
+from hp_guard.state import (
+    InMemoryRateLimitStore,
+    RateLimitKey,
+    RateLimitStore,
+    RateLimitedPolicyStore,
+    StateError,
+)
 
 __all__ = (
     "Action",
@@ -42,6 +48,7 @@ __all__ = (
     "PolicySnapshot",
     "RateLimit",
     "RateLimitKey",
+    "RateLimitStore",
     "RateLimitedPolicyStore",
     "Rule",
     "SimulationPolicy",
