@@ -17,3 +17,8 @@ leaf compatibility, composition truth values, UTC interval boundaries, and
 parser rejection for malformed or excessive condition trees. Each successful
 case supplies an explicit UTC instant so both runtimes evaluate the same
 policy time.
+
+`cases/durable_log_recovery_v1.json` defines the Unix-only local audit-log
+recovery contract: complete-record corruption, a torn final record, interrupted
+rotation states, and exclusive writer lease contention. Both runtimes run this
+fixture before appending their activation record.

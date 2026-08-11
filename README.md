@@ -215,12 +215,15 @@ security perimeter.
 - It has no proxy/sidecar transport, remote audit storage, encryption/key
   management, signed policies, automatic policy watching, telemetry, or hosted
   service.
-- An audit path has one writer. The local JSONL audit is synced per completed
-  append, but it is not a write-ahead log: it does not coordinate multiple
-  processes and does not provide automatic recovery from a process kill during
-  a write or rotation. Unix-like hosts receive no-follow regular-file checks
-  and owner-only modes; other platforms rely on their native filesystem
-  protections.
+- On Unix-like hosts, an audit path has one exclusive, cross-process writer
+  lease. The local JSONL audit syncs completed appends and recovers a torn
+  final record or an interrupted bounded rotation according to the shared
+  [durable-log recovery fixture](conformance/cases/durable_log_recovery_v1.json).
+  It is not a write-ahead log, replicated store, or tamper-evident record: a
+  crash can still lose the in-flight record, and every writer must use this
+  boundary. Managed audit and rotation files use no-follow regular-file checks
+  and owner-only modes. Durable recovery is intentionally unsupported on
+  non-Unix platforms.
 - Time windows use the local UTC wall clock. They do not compensate for clock
   skew or supply a trusted/distributed time source.
 - The source contract is version 1 only. Future language versions require a

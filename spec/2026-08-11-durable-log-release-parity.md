@@ -1,6 +1,6 @@
 # Spec: Durable-Log Release Parity
 
-**Status:** Approved for implementation.
+**Status:** Implemented.
 
 ## Objective
 
