@@ -45,3 +45,9 @@ def test_user_mismatch():
     rule = Rule(action=Action.DENY, target={"user": "admin"})
     call = PolicyCall(agent="bot", tool="curl", user="guest")
     assert rule_matches_rule(rule, call) is False
+
+
+def test_context_target_requires_all_context_fields():
+    rule = Rule(action=Action.DENY, target={"context.phase": "prompt", "context.source": "web"})
+    assert rule_matches_rule(rule, PolicyCall(context={"phase": "prompt", "source": "web"})) is True
+    assert rule_matches_rule(rule, PolicyCall(context={"phase": "prompt"})) is False

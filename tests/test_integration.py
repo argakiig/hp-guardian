@@ -6,9 +6,8 @@ from hp_guard.models import PolicyCall
 
 
 POLICY = """
+version: 1
 global:
-  rate_limit: 100/min
-  log_all: true
   default_action: allow
 
 agents:
@@ -19,7 +18,6 @@ agents:
           - action: deny
             condition:
               args_match: ".*--delete.*"
-        rate_limit: 20/min
       write_file:
         rules:
           - action: deny
@@ -46,8 +44,7 @@ def test_research_bot_write_file_etc_denied():
     engine = PolicyParser.parse(POLICY)
     call = PolicyCall(agent="research-bot", tool="write_file", args=["/etc/passwd"])
     decision = engine.resolve_call(call)
-    # No path_pattern support yet — defaults to allow
-    assert decision.action.value == "allow"
+    assert decision.action.value == "deny"
 
 
 def test_unknown_agent_defaults_to_allow():

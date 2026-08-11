@@ -15,9 +15,20 @@ def _rule_specificity(rule: Rule) -> int:
     return len(rule.target)
 
 
+def _action_priority(action: Action) -> int:
+    return {
+        Action.REQUIRE_APPROVAL: 5,
+        Action.THROTTLE: 4,
+        Action.REDIRECT: 3,
+        Action.ALLOW: 2,
+        Action.LOG: 1,
+    }.get(action, 0)
+
+
 class Engine:
-    def __init__(self, rules: list[Rule]):
+    def __init__(self, rules: list[Rule], default_action: Action = Action.ALLOW):
         self.rules = rules
+        self.default_action = default_action
 
     def resolve_call(self, call: PolicyCall) -> Decision:
         matching = [
@@ -25,18 +36,17 @@ class Engine:
             if rule_matches_rule(r, call) and evaluate(r, call)
         ]
         if not matching:
-            return Decision(action=Action.ALLOW)
+            return Decision(action=self.default_action)
 
-        # Sort by specificity descending (more target fields = more specific)
-        matching.sort(key=lambda r: _rule_specificity(r), reverse=True)
+        matched_rules = [rule.rule_index for rule in matching]
+        if any(rule.action == Action.DENY for rule in matching):
+            return Decision(action=Action.DENY, matched_rules=matched_rules)
 
-        # Among same specificity, deny overrides allow
         best = matching[0]
-        if any(
-            r.action == Action.DENY and _rule_specificity(r) == _rule_specificity(best)
-            for r in matching
-        ):
-            deny_rules = [r for r in matching if r.action == Action.DENY and _rule_specificity(r) == _rule_specificity(best)]
-            best = deny_rules[0]
+        for rule in matching[1:]:
+            if _rule_specificity(rule) > _rule_specificity(best):
+                best = rule
+            elif _rule_specificity(rule) == _rule_specificity(best) and _action_priority(rule.action) > _action_priority(best.action):
+                best = rule
 
-        return Decision(action=best.action, matched_rules=[best.rule_index])
+        return Decision(action=best.action, matched_rules=matched_rules)

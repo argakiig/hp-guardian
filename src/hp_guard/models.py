@@ -13,6 +13,14 @@ class Action(Enum):
     REDIRECT = "redirect"
 
 
+class PolicyError(Exception):
+    """A policy validation failure with a stable, language-neutral code."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 @dataclass
 class Rule:
     action: Action
@@ -27,3 +35,23 @@ class PolicyCall:
     args: list = field(default_factory=list)
     user: str | None = None
     context: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AuditEntry:
+    timestamp: str
+    agent: str | None
+    tool: str | None
+    args: list
+    decision: Action
+    matched_rules: list[int]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "timestamp": self.timestamp,
+            "agent": self.agent,
+            "tool": self.tool,
+            "args": self.args,
+            "decision": self.decision.value,
+            "matched_rules": self.matched_rules,
+        }

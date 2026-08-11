@@ -27,3 +27,25 @@ def test_no_conditions_always_passes():
     rule = Rule(action=Action.DENY, condition={})
     call = PolicyCall(tool="curl", args=["anything"])
     assert evaluate(rule, call) is True
+
+
+def test_path_pattern_is_lexical_and_matches_any_argument():
+    rule = Rule(action=Action.DENY, condition={"path_pattern": "/etc/*"})
+    call = PolicyCall(args=["--mode", "/etc/nested/config"])
+    assert evaluate(rule, call) is True
+
+
+def test_path_pattern_does_not_normalize_paths():
+    rule = Rule(action=Action.DENY, condition={"path_pattern": "/etc/*"})
+    call = PolicyCall(args=["/tmp/../etc/passwd"])
+    assert evaluate(rule, call) is False
+
+
+def test_args_match_dot_matches_a_newline_in_the_portable_v1_language():
+    rule = Rule(action=Action.DENY, condition={"args_match": "^foo.$"})
+    assert evaluate(rule, PolicyCall(args=["foo\n"])) is True
+
+
+def test_args_match_end_anchor_requires_the_actual_end_of_input():
+    rule = Rule(action=Action.DENY, condition={"args_match": "^foo$"})
+    assert evaluate(rule, PolicyCall(args=["foo\n"])) is False
