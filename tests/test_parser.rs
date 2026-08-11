@@ -200,3 +200,27 @@ agents:
     assert_eq!(engine.resolve_call(&prompt_call).action, Action::Deny);
     assert_eq!(engine.resolve_call(&execution_call).action, Action::Allow);
 }
+
+#[test]
+fn test_global_deny_cannot_be_overridden_by_specific_allow() {
+    let yaml = r#"
+rules:
+  - action: deny
+agents:
+  bot:
+    tools:
+      curl:
+        rules:
+          - action: allow
+"#;
+    let engine = PolicyParser::parse(yaml).expect("policy is valid");
+    let call = PolicyCall {
+        agent: Some("bot".into()),
+        tool: Some("curl".into()),
+        ..Default::default()
+    };
+
+    let decision = engine.resolve_call(&call);
+    assert_eq!(decision.action, Action::Deny);
+    assert_eq!(decision.matched_rules, vec![0, 1]);
+}

@@ -173,6 +173,52 @@ fn test_require_approval_action() {
     assert_eq!(decision.action, Action::RequireApproval);
 }
 
+#[test]
+fn test_require_approval_beats_allow_at_the_same_specificity() {
+    let allow_rule = Rule {
+        action: Action::Allow,
+        target: [("agent".into(), "bot".into())].into(),
+        condition: Default::default(),
+        rule_index: 0,
+    };
+    let approval_rule = Rule {
+        action: Action::RequireApproval,
+        target: [("agent".into(), "bot".into())].into(),
+        condition: Default::default(),
+        rule_index: 1,
+    };
+    let engine = Engine::new(vec![allow_rule, approval_rule]);
+    let call = PolicyCall {
+        agent: Some("bot".into()),
+        ..Default::default()
+    };
+
+    assert_eq!(engine.resolve_call(&call).action, Action::RequireApproval);
+}
+
+#[test]
+fn test_decision_records_every_matching_rule() {
+    let allow_rule = Rule {
+        action: Action::Allow,
+        target: [("agent".into(), "bot".into())].into(),
+        condition: Default::default(),
+        rule_index: 0,
+    };
+    let deny_rule = Rule {
+        action: Action::Deny,
+        target: [("agent".into(), "bot".into())].into(),
+        condition: Default::default(),
+        rule_index: 1,
+    };
+    let engine = Engine::new(vec![allow_rule, deny_rule]);
+    let call = PolicyCall {
+        agent: Some("bot".into()),
+        ..Default::default()
+    };
+
+    assert_eq!(engine.resolve_call(&call).matched_rules, vec![0, 1]);
+}
+
 /// Redirect action test
 #[test]
 fn test_redirect_action() {

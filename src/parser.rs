@@ -24,6 +24,8 @@ struct PolicyFile {
     #[serde(default)]
     global: GlobalConfig,
     #[serde(default)]
+    rules: Vec<RuleEntry>,
+    #[serde(default)]
     agents: BTreeMap<String, AgentConfig>,
 }
 
@@ -49,30 +51,49 @@ impl PolicyParser {
         let mut rules: Vec<Rule> = Vec::new();
         let mut index: usize = 0;
 
+        for rule_entry in &policy.rules {
+            add_rule(&mut rules, rule_entry, BTreeMap::new(), &mut index)?;
+        }
+
         for (agent_name, agent_config) in &policy.agents {
             for (tool_name, tool_config) in &agent_config.tools {
                 for rule_entry in &tool_config.rules {
-                    let action = parse_action(&rule_entry.action)?;
-
-                    let mut target = parse_target(rule_entry.target.as_ref())?;
-                    add_enclosing_target(&mut target, "agent", agent_name)?;
-                    add_enclosing_target(&mut target, "tool", tool_name)?;
-                    let condition = rule_entry.condition.clone().unwrap_or_default();
-                    validate_conditions(&condition)?;
-
-                    rules.push(Rule {
-                        action,
-                        target,
-                        condition,
-                        rule_index: index,
-                    });
-                    index += 1;
+                    let enclosing_target = [
+                        ("agent".to_owned(), agent_name.clone()),
+                        ("tool".to_owned(), tool_name.clone()),
+                    ]
+                    .into();
+                    add_rule(&mut rules, rule_entry, enclosing_target, &mut index)?;
                 }
             }
         }
 
         Ok(Engine::with_default_action(rules, default_action))
     }
+}
+
+fn add_rule(
+    rules: &mut Vec<Rule>,
+    rule_entry: &RuleEntry,
+    enclosing_target: BTreeMap<String, String>,
+    index: &mut usize,
+) -> Result<(), PolicyError> {
+    let action = parse_action(&rule_entry.action)?;
+    let mut target = parse_target(rule_entry.target.as_ref())?;
+    for (key, value) in enclosing_target {
+        add_enclosing_target(&mut target, &key, &value)?;
+    }
+    let condition = rule_entry.condition.clone().unwrap_or_default();
+    validate_conditions(&condition)?;
+
+    rules.push(Rule {
+        action,
+        target,
+        condition,
+        rule_index: *index,
+    });
+    *index += 1;
+    Ok(())
 }
 
 fn parse_action(action: &str) -> Result<Action, PolicyError> {
