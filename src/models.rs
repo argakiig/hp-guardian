@@ -31,31 +31,39 @@ impl Action {
 #[derive(Debug)]
 pub enum PolicyError {
     InvalidYaml(serde_yaml::Error),
-    InvalidAction {
-        action: String,
-    },
-    InvalidCondition {
-        condition: String,
-    },
-    InvalidTarget {
-        target: String,
-    },
-    InvalidField {
-        field: String,
-    },
-    ConflictingTarget {
-        target: String,
-    },
-    InvalidRegex {
-        pattern: String,
-        source: regex::Error,
-    },
+    UnsupportedVersion { version: Option<String> },
+    InvalidAction { action: String },
+    InvalidCondition { condition: String },
+    InvalidTarget { target: String },
+    InvalidField { field: String },
+    ConflictingTarget { target: String },
+    InvalidRegex { pattern: String, reason: String },
+}
+
+impl PolicyError {
+    /// Stable, language-neutral code for policy-loading failures.
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidYaml(_) => "invalid_yaml",
+            Self::InvalidAction { .. } => "invalid_action",
+            Self::InvalidCondition { .. } => "invalid_condition",
+            Self::InvalidTarget { .. } => "invalid_target",
+            Self::InvalidField { .. } => "invalid_field",
+            Self::ConflictingTarget { .. } => "conflicting_target",
+            Self::InvalidRegex { .. } => "invalid_regex",
+            Self::UnsupportedVersion { .. } => "unsupported_version",
+        }
+    }
 }
 
 impl Display for PolicyError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidYaml(error) => write!(formatter, "invalid YAML policy: {error}"),
+            Self::UnsupportedVersion { version } => match version {
+                Some(version) => write!(formatter, "unsupported policy version: {version}"),
+                None => write!(formatter, "policy version is required"),
+            },
             Self::InvalidAction { action } => {
                 write!(formatter, "unsupported policy action: {action}")
             }
@@ -72,8 +80,11 @@ impl Display for PolicyError {
                     "nested target conflicts with enclosing {target} scope"
                 )
             }
-            Self::InvalidRegex { pattern, source } => {
-                write!(formatter, "invalid args_match regex {pattern:?}: {source}")
+            Self::InvalidRegex { pattern, reason } => {
+                write!(
+                    formatter,
+                    "invalid v1 args_match pattern {pattern:?}: {reason}"
+                )
             }
         }
     }
@@ -83,12 +94,13 @@ impl Error for PolicyError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidYaml(error) => Some(error),
-            Self::InvalidRegex { source, .. } => Some(source),
             Self::InvalidAction { .. }
             | Self::InvalidCondition { .. }
             | Self::InvalidTarget { .. }
             | Self::InvalidField { .. }
-            | Self::ConflictingTarget { .. } => None,
+            | Self::ConflictingTarget { .. }
+            | Self::UnsupportedVersion { .. }
+            | Self::InvalidRegex { .. } => None,
         }
     }
 }

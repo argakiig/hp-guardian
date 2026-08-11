@@ -6,6 +6,7 @@ use hp_guard::parser::PolicyParser;
 
 fn demo_policy() -> &'static str {
     r#"
+version: 1
 global:
   default_action: allow
 

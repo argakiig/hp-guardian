@@ -5,6 +5,7 @@ use hp_guard::Action;
 #[test]
 fn test_parse_throttle_action() {
     let yaml = r#"
+version: 1
 agents:
   my-agent:
     tools:
@@ -20,6 +21,7 @@ agents:
 #[test]
 fn test_parse_log_action() {
     let yaml = r#"
+version: 1
 agents:
   my-agent:
     tools:
@@ -35,6 +37,7 @@ agents:
 #[test]
 fn test_parse_require_approval_action() {
     let yaml = r#"
+version: 1
 agents:
   my-agent:
     tools:
@@ -50,6 +53,7 @@ agents:
 #[test]
 fn test_parse_redirect_action() {
     let yaml = r#"
+version: 1
 agents:
   my-agent:
     tools:
@@ -65,6 +69,7 @@ agents:
 #[test]
 fn test_parse_rule_without_condition_defaults_empty() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:
@@ -79,6 +84,7 @@ agents:
 #[test]
 fn test_global_default_deny_is_applied_to_unknown_calls() {
     let yaml = r#"
+version: 1
 global:
   default_action: deny
 "#;
@@ -95,6 +101,7 @@ global:
 #[test]
 fn test_unknown_action_is_rejected_at_parse_time() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:
@@ -109,6 +116,7 @@ agents:
 #[test]
 fn test_invalid_args_match_regex_is_rejected_at_parse_time() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:
@@ -125,6 +133,7 @@ agents:
 #[test]
 fn test_unknown_condition_is_rejected_at_parse_time() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:
@@ -141,6 +150,7 @@ agents:
 #[test]
 fn test_rule_target_user_limits_the_enclosing_tool_rule() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:
@@ -172,6 +182,7 @@ agents:
 #[test]
 fn test_rule_target_context_limits_the_enclosing_tool_rule() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:
@@ -204,6 +215,7 @@ agents:
 #[test]
 fn test_global_deny_cannot_be_overridden_by_specific_allow() {
     let yaml = r#"
+version: 1
 rules:
   - action: deny
 agents:
@@ -228,6 +240,7 @@ agents:
 #[test]
 fn test_unknown_global_field_is_rejected_instead_of_falling_back_to_allow() {
     let yaml = r#"
+version: 1
 global:
   default_actoin: deny
 "#;
@@ -238,6 +251,7 @@ global:
 #[test]
 fn test_unknown_top_level_field_is_rejected() {
     let yaml = r#"
+version: 1
 agants:
   bot: {}
 "#;
@@ -246,8 +260,87 @@ agants:
 }
 
 #[test]
+fn test_missing_version_is_rejected_with_a_stable_error_code() {
+    let yaml = r#"
+global:
+  default_action: deny
+"#;
+
+    let error = PolicyParser::parse(yaml).expect_err("version is required");
+    assert_eq!(error.code(), "unsupported_version");
+}
+
+#[test]
+fn test_unsupported_version_is_rejected_with_a_stable_error_code() {
+    let yaml = r#"
+version: 2
+"#;
+
+    let error = PolicyParser::parse(yaml).expect_err("only version 1 is supported");
+    assert_eq!(error.code(), "unsupported_version");
+}
+
+#[test]
+fn test_portability_excluded_args_match_regex_is_rejected() {
+    let yaml = r#"
+version: 1
+rules:
+  - action: deny
+    condition:
+      args_match: "(?=delete)delete"
+"#;
+
+    let error = PolicyParser::parse(yaml).expect_err("look-around is not portable in v1");
+    assert_eq!(error.code(), "invalid_regex");
+}
+
+#[test]
+fn test_numeric_args_match_backreference_is_rejected() {
+    let yaml = r#"
+version: 1
+rules:
+  - action: deny
+    condition:
+      args_match: "(delete)\\1"
+"#;
+
+    let error = PolicyParser::parse(yaml).expect_err("backreferences are not portable in v1");
+    assert_eq!(error.code(), "invalid_regex");
+}
+
+#[test]
+fn test_escaped_grouping_syntax_is_rejected_outside_the_v1_pattern_language() {
+    let yaml = r#"
+version: 1
+rules:
+  - action: deny
+    condition:
+      args_match: '\(\?='
+"#;
+
+    let error = PolicyParser::parse(yaml).expect_err("grouping syntax is not supported in v1");
+    assert_eq!(error.code(), "invalid_regex");
+}
+
+#[test]
+fn test_duplicate_rule_ids_are_rejected() {
+    let yaml = r#"
+version: 1
+rules:
+  - id: block-delete
+    action: deny
+  - id: block-delete
+    action: allow
+"#;
+
+    let error = PolicyParser::parse(yaml).expect_err("rule identifiers must be unique");
+    assert_eq!(error.code(), "invalid_field");
+}
+
+#[test]
 fn test_rule_indices_follow_the_document_declaration_order() {
     let yaml = r#"
+version: 1
 agents:
   bot:
     tools:

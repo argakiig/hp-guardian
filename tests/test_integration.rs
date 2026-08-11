@@ -4,6 +4,7 @@ use hp_guard::parser::PolicyParser;
 use hp_guard::Action;
 
 const POLICY: &str = r#"
+version: 1
 global:
   default_action: allow
 
