@@ -486,6 +486,11 @@ class AuditedPolicyStore:
         with self._lock:
             return self._active_policy.snapshot
 
+    def close(self) -> None:
+        """Close the mandatory audit boundary; later operations fail closed."""
+        with self._lock:
+            self._audit_log.close()
+
     def reload(self, policy_text: str) -> PolicySnapshot:
         candidate = self._build_snapshot(policy_text)
         with self._lock:

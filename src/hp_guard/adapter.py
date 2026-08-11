@@ -108,6 +108,10 @@ class InlineEnforcementAdapter:
         self._policy_store = policy_store
         self._now_unix_ms = now_unix_ms or (lambda: time.time_ns() // 1_000_000)
 
+    def close(self) -> None:
+        """Close the underlying required audit boundary."""
+        self._policy_store.close()
+
     def authorize(self, request: EnforcementRequest) -> EnforcementResponse:
         if not isinstance(request, EnforcementRequest):
             raise AdapterError("invalid_request", "request must be an EnforcementRequest")

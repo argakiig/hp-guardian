@@ -139,6 +139,19 @@ def test_failed_authorization_write_returns_an_audit_error_without_a_decision(tm
         store.authorize(PolicyCall(agent="bot", tool="delete_file"))
 
 
+def test_closed_policy_store_fails_closed_for_every_audit_boundary(tmp_path):
+    store = AuditedPolicyStore(POLICY, AuditLog(tmp_path / "audit.jsonl"))
+    store.close()
+
+    with pytest.raises(AuditError) as authorization_error:
+        store.authorize(PolicyCall(agent="bot", tool="delete_file"))
+    assert authorization_error.value.code == "audit_closed"
+
+    with pytest.raises(AuditError) as reload_error:
+        store.reload(POLICY)
+    assert reload_error.value.code == "audit_closed"
+
+
 def test_internal_authorization_metadata_preserves_the_supplied_correlation_id(tmp_path):
     path = tmp_path / "audit.jsonl"
     store = AuditedPolicyStore(POLICY, AuditLog(path))

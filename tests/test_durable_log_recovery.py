@@ -136,3 +136,40 @@ def test_second_process_cannot_acquire_the_shared_audit_lease(tmp_path: Path) ->
         holder.stdin.write("\n")
         holder.stdin.flush()
         holder.wait(timeout=5)
+
+
+def test_recovery_rejects_symlinked_lock_and_manifest_paths(tmp_path: Path) -> None:
+    path = tmp_path / "audit.jsonl"
+    lock_target = tmp_path / "lock-target"
+    lock_target.write_text("unchanged")
+    path.with_name("audit.jsonl.lock").symlink_to(lock_target)
+
+    with pytest.raises(AuditError) as lock_error:
+        AuditLog(path).append({"event": "contender"})
+    assert lock_error.value.code == "audit_write_failed"
+    assert lock_target.read_text() == "unchanged"
+
+    path.with_name("audit.jsonl.lock").unlink()
+    path.write_text('{"event":"before"}\n')
+    manifest_target = tmp_path / "manifest-target.json"
+    manifest_target.write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "transaction_id": "transaction",
+                "max_rotated_files": 1,
+                "operation": "rotate",
+                "phase": "staging",
+                "present": {"active": True, "backups": []},
+            }
+        )
+    )
+    manifest = path.with_name("audit.jsonl.rotation.json")
+    manifest.symlink_to(manifest_target)
+
+    with pytest.raises(AuditError) as manifest_error:
+        AuditLog(path).append({"event": "contender"})
+    assert manifest_error.value.code == "audit_write_failed"
+    assert manifest.is_symlink()
+    assert path.read_text() == '{"event":"before"}\n'
+    assert json.loads(manifest_target.read_text())["transaction_id"] == "transaction"

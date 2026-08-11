@@ -193,7 +193,8 @@ impl AuditLog {
         let mut file = open_append(&self.path).map_err(AuditError::Io)?;
         set_owner_only_permissions(&file).map_err(AuditError::Io)?;
         file.write_all(&encoded).map_err(AuditError::Io)?;
-        file.sync_data().map_err(AuditError::Io)
+        file.sync_data().map_err(AuditError::Io)?;
+        sync_parent(&self.path).map_err(AuditError::Io)
     }
 
     pub fn close(&self) {
@@ -223,6 +224,7 @@ impl AuditLog {
 
     fn recover_tails(&self) -> Result<(), AuditError> {
         let manifest = PathBuf::from(format!("{}.rotation.json", self.path.display()));
+        validate_regular_or_absent(&manifest).map_err(AuditError::Io)?;
         if manifest.exists() {
             self.recover_manifest(&manifest)?;
         }
@@ -248,6 +250,7 @@ impl AuditLog {
             paths.push(self.backup_path(index));
         }
         for path in paths {
+            validate_regular_or_absent(&path).map_err(AuditError::Io)?;
             if path.exists() {
                 recover_tail(&path)?;
             }
@@ -256,9 +259,8 @@ impl AuditLog {
     }
 
     fn recover_manifest(&self, manifest_path: &Path) -> Result<(), AuditError> {
-        let manifest: RotationManifest =
-            serde_json::from_slice(&fs::read(manifest_path).map_err(AuditError::Io)?)
-                .map_err(|_| AuditError::RecoveryFailed)?;
+        let manifest: RotationManifest = serde_json::from_slice(&read_regular(manifest_path)?)
+            .map_err(|_| AuditError::RecoveryFailed)?;
         if manifest.format_version != 1
             || manifest.operation != "rotate"
             || !matches!(manifest.phase.as_str(), "staging" | "installing")
@@ -396,7 +398,11 @@ impl AuditLog {
             path.display(),
             manifest.transaction_id
         ));
-        let mut file = open_append(&temporary).map_err(AuditError::Io)?;
+        if regular_exists(&temporary)? {
+            return Err(AuditError::RecoveryFailed);
+        }
+        let mut file = create_new_nofollow(&temporary).map_err(AuditError::Io)?;
+        sync_parent(&self.path).map_err(AuditError::Io)?;
         file.write_all(&serde_json::to_vec(manifest).map_err(AuditError::Serialization)?)
             .map_err(AuditError::Io)?;
         file.sync_all().map_err(AuditError::Io)?;
@@ -452,6 +458,7 @@ impl AuditLog {
                 .unwrap_or(false);
             if expired {
                 fs::remove_file(backup).map_err(AuditError::Io)?;
+                sync_parent(&self.path).map_err(AuditError::Io)?;
             }
         }
         Ok(())
@@ -474,7 +481,10 @@ impl AuditLog {
             present: RotationPresent {
                 active: true,
                 backups: (1..=self.config.max_rotated_files)
-                    .filter(|i| regular_exists(&self.backup_path(*i)).unwrap_or(false))
+                    .map(|index| Ok((index, regular_exists(&self.backup_path(index))?)))
+                    .collect::<Result<Vec<_>, AuditError>>()?
+                    .into_iter()
+                    .filter_map(|(index, exists)| exists.then_some(index))
                     .collect(),
             },
         };
@@ -579,6 +589,16 @@ fn recover_tail(path: &Path) -> Result<(), AuditError> {
         .map_err(AuditError::Io)
 }
 
+fn read_regular(path: &Path) -> Result<Vec<u8>, AuditError> {
+    validate_regular_or_absent(path).map_err(AuditError::Io)?;
+    let mut bytes = Vec::new();
+    open_read_nofollow(path)
+        .map_err(AuditError::Io)?
+        .read_to_end(&mut bytes)
+        .map_err(AuditError::Io)?;
+    Ok(bytes)
+}
+
 #[cfg(unix)]
 fn open_read_nofollow(path: &Path) -> std::io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -617,6 +637,22 @@ fn open_append(path: &Path) -> std::io::Result<File> {
         .custom_flags(libc::O_NOFOLLOW)
         .mode(0o600)
         .open(path)
+}
+
+#[cfg(unix)]
+fn create_new_nofollow(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn create_new_nofollow(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new().create_new(true).write(true).open(path)
 }
 
 #[cfg(not(unix))]

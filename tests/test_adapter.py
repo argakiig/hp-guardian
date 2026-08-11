@@ -229,3 +229,14 @@ def test_audit_failure_fails_closed_with_stable_adapter_error(tmp_path):
         adapter.authorize(EnforcementRequest.from_dict(fixture["requests"][0]))
 
     assert raised.value.code == "audit_write_failed"
+
+
+def test_closed_adapter_maps_the_closed_audit_boundary_to_a_stable_error(tmp_path):
+    fixture = _fixture()
+    adapter, _ = _adapter(tmp_path, now_unix_ms=fixture["now_unix_ms"])
+    adapter.close()
+
+    with pytest.raises(AdapterError) as raised:
+        adapter.authorize(EnforcementRequest.from_dict(fixture["requests"][0]))
+
+    assert raised.value.code == "audit_write_failed"

@@ -2,7 +2,9 @@ use hp_guard::{AuditError, AuditLog, AuditLogConfig, AuditedPolicyStore};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const POLICY: &str = "version: 1\n";
@@ -167,4 +169,103 @@ fn second_store_cannot_acquire_the_audit_lease() {
         AuditedPolicyStore::with_policy(POLICY, second),
         Err(AuditError::LockUnavailable)
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn python_and_rust_contend_for_the_same_audit_lease() {
+    let directory = root("cross-runtime-lease");
+    let path = directory.join("audit.jsonl");
+    let python_path = format!("{}/src", env!("CARGO_MANIFEST_DIR"));
+    let mut holder = Command::new("python3")
+        .env("PYTHONPATH", python_path.clone())
+        .arg("-c")
+        .arg(
+            "from hp_guard.audit import AuditLog; import sys; log = AuditLog(sys.argv[1]); log.append({'event': 'holder'}); print('ready', flush=True); input(); log.close()",
+        )
+        .arg(&path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start Python holder");
+    let mut stdout = BufReader::new(holder.stdout.take().expect("holder stdout"));
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).expect("read holder readiness");
+    assert_eq!(ready.trim(), "ready");
+    let contender = AuditLog::new(&path, AuditLogConfig::default()).expect("contender log");
+    assert!(matches!(
+        AuditedPolicyStore::with_policy(POLICY, contender),
+        Err(AuditError::LockUnavailable)
+    ));
+    holder
+        .stdin
+        .take()
+        .expect("holder stdin")
+        .write_all(b"\n")
+        .expect("release Python holder");
+    assert!(holder.wait().expect("wait Python holder").success());
+
+    let rust_holder = AuditLog::new(&path, AuditLogConfig::default()).expect("Rust holder log");
+    let _store = AuditedPolicyStore::with_policy(POLICY, rust_holder).expect("Rust holder");
+    let result = Command::new("python3")
+        .env("PYTHONPATH", python_path)
+        .arg("-c")
+        .arg(
+            "from hp_guard.audit import AuditError, AuditLog; import sys\ntry:\n AuditLog(sys.argv[1]).append({'event': 'contender'})\nexcept AuditError as error:\n print(error.code)\nelse:\n print('acquired')",
+        )
+        .arg(&path)
+        .output()
+        .expect("run Python contender");
+    assert!(result.status.success());
+    assert_eq!(
+        String::from_utf8(result.stdout)
+            .expect("UTF-8 output")
+            .trim(),
+        "audit_lock_unavailable"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn recovery_rejects_symlinked_lock_and_manifest_paths() {
+    use std::os::unix::fs::symlink;
+
+    let directory = root("symlinked-metadata");
+    let path = directory.join("audit.jsonl");
+    let lock_target = directory.join("lock-target");
+    fs::write(&lock_target, "unchanged").expect("write target");
+    symlink(&lock_target, path.with_file_name("audit.jsonl.lock")).expect("symlink lock");
+    let log = AuditLog::new(&path, AuditLogConfig::default()).expect("log");
+    assert!(matches!(
+        AuditedPolicyStore::with_policy(POLICY, log),
+        Err(AuditError::Io(_))
+    ));
+    assert_eq!(
+        fs::read_to_string(&lock_target).expect("read target"),
+        "unchanged"
+    );
+
+    fs::remove_file(path.with_file_name("audit.jsonl.lock")).expect("remove lock symlink");
+    fs::write(&path, "{\"event\":\"before\"}\n").expect("write active");
+    let manifest_target = directory.join("manifest-target.json");
+    fs::write(
+        &manifest_target,
+        r#"{"format_version":1,"transaction_id":"transaction","max_rotated_files":1,"operation":"rotate","phase":"staging","present":{"active":true,"backups":[]}}"#,
+    )
+    .expect("write manifest target");
+    let manifest = path.with_file_name("audit.jsonl.rotation.json");
+    symlink(&manifest_target, &manifest).expect("symlink manifest");
+    let log = AuditLog::new(&path, AuditLogConfig::default()).expect("log");
+    assert!(matches!(
+        AuditedPolicyStore::with_policy(POLICY, log),
+        Err(AuditError::Io(_))
+    ));
+    assert!(fs::symlink_metadata(&manifest)
+        .expect("manifest metadata")
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        fs::read_to_string(&path).expect("read active"),
+        "{\"event\":\"before\"}\n"
+    );
 }
