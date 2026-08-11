@@ -2,11 +2,16 @@ import hp_guard
 
 from hp_guard import (
     Action,
+    AdapterError,
     AuditError,
     AuditEntry,
     AuditLog,
     AuditLogger,
     AuditedPolicyStore,
+    EffectRequest,
+    EnforcementRequest,
+    EnforcementResponse,
+    InlineEnforcementAdapter,
     Authorization,
     Decision,
     Engine,
@@ -26,11 +31,16 @@ from hp_guard import (
 def test_package_root_declares_and_exports_its_public_api():
     expected_exports = {
         "Action": Action,
+        "AdapterError": AdapterError,
         "AuditError": AuditError,
         "AuditEntry": AuditEntry,
         "AuditLog": AuditLog,
         "AuditLogger": AuditLogger,
         "AuditedPolicyStore": AuditedPolicyStore,
+        "EffectRequest": EffectRequest,
+        "EnforcementRequest": EnforcementRequest,
+        "EnforcementResponse": EnforcementResponse,
+        "InlineEnforcementAdapter": InlineEnforcementAdapter,
         "Authorization": Authorization,
         "Decision": Decision,
         "Engine": Engine,

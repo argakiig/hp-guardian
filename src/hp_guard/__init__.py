@@ -11,14 +11,26 @@ from hp_guard.audit import (
     OutcomeStatus,
     PolicySnapshot,
 )
+from hp_guard.adapter import (
+    AdapterError,
+    EffectRequest,
+    EnforcementRequest,
+    EnforcementResponse,
+    InlineEnforcementAdapter,
+)
 
 __all__ = (
     "Action",
+    "AdapterError",
     "AuditError",
     "AuditEntry",
     "AuditLog",
     "AuditLogger",
     "AuditedPolicyStore",
+    "EffectRequest",
+    "EnforcementRequest",
+    "EnforcementResponse",
+    "InlineEnforcementAdapter",
     "Authorization",
     "Decision",
     "Engine",

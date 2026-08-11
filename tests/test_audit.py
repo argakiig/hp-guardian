@@ -139,6 +139,32 @@ def test_failed_authorization_write_returns_an_audit_error_without_a_decision(tm
         store.authorize(PolicyCall(agent="bot", tool="delete_file"))
 
 
+def test_internal_authorization_metadata_preserves_the_supplied_correlation_id(tmp_path):
+    path = tmp_path / "audit.jsonl"
+    store = AuditedPolicyStore(POLICY, AuditLog(path))
+
+    authorization = store._authorize_with_metadata(
+        PolicyCall(agent="bot", tool="delete_file"),
+        correlation_id="host-request-id",
+        caller_id="host-a",
+        deadline_unix_ms=1234,
+    )
+
+    record = _records(path)[-1]
+    assert authorization.correlation_id == "host-request-id"
+    assert authorization.caller_id == "host-a"
+    assert authorization.deadline_unix_ms == 1234
+    assert record["caller_id"] == "host-a"
+    assert record["deadline_unix_ms"] == 1234
+
+    store.record_outcome(authorization, OutcomeStatus.SUCCEEDED)
+
+    outcome = _records(path)[-1]
+    assert outcome["correlation_id"] == "host-request-id"
+    assert outcome["caller_id"] == "host-a"
+    assert outcome["deadline_unix_ms"] == 1234
+
+
 def test_reload_cannot_activate_a_new_snapshot_before_an_inflight_authorization_is_written(tmp_path):
     path = tmp_path / "audit.jsonl"
     audit_log = AuditLog(path)

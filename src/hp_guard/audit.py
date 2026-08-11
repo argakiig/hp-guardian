@@ -51,6 +51,8 @@ class Authorization:
     agent: str | None
     tool: str | None
     user: str | None
+    caller_id: str | None = None
+    deadline_unix_ms: int | None = None
 
 
 class AuditLog:
@@ -191,16 +193,28 @@ class AuditedPolicyStore:
             return candidate.snapshot
 
     def authorize(self, call: PolicyCall) -> Authorization:
+        return self._authorize_with_metadata(call, correlation_id=str(uuid.uuid4()))
+
+    def _authorize_with_metadata(
+        self,
+        call: PolicyCall,
+        *,
+        correlation_id: str,
+        caller_id: str | None = None,
+        deadline_unix_ms: int | None = None,
+    ) -> Authorization:
         with self._lock:
             active_policy = self._active_policy
             decision = active_policy.engine.resolve_call(call)
             authorization = Authorization(
-                correlation_id=str(uuid.uuid4()),
+                correlation_id=correlation_id,
                 snapshot=active_policy.snapshot,
                 decision=decision,
                 agent=call.agent,
                 tool=call.tool,
                 user=call.user,
+                caller_id=caller_id,
+                deadline_unix_ms=deadline_unix_ms,
             )
             self._audit_log.append(
                 _record(
@@ -211,6 +225,8 @@ class AuditedPolicyStore:
                     tool=call.tool,
                     user=call.user,
                     decision=decision,
+                    caller_id=caller_id,
+                    deadline_unix_ms=deadline_unix_ms,
                 )
             )
         return authorization
@@ -236,6 +252,8 @@ class AuditedPolicyStore:
             tool=authorization.tool,
             user=authorization.user,
             decision=authorization.decision,
+            caller_id=authorization.caller_id,
+            deadline_unix_ms=authorization.deadline_unix_ms,
         )
         record["outcome_status"] = status.value
         record["outcome_detail"] = detail
@@ -265,8 +283,10 @@ def _record(
     tool: str | None = None,
     user: str | None = None,
     decision: Decision | None = None,
+    caller_id: str | None = None,
+    deadline_unix_ms: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    record = {
         "event": event,
         "correlation_id": correlation_id,
         "policy_version": snapshot.version,
@@ -277,6 +297,11 @@ def _record(
         "decision": decision.action.value if decision else None,
         "matched_rules": list(decision.matched_rules) if decision else [],
     }
+    if caller_id is not None:
+        record["caller_id"] = caller_id
+    if deadline_unix_ms is not None:
+        record["deadline_unix_ms"] = deadline_unix_ms
+    return record
 
 
 def _format_timestamp(value: datetime) -> str:
