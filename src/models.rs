@@ -3,7 +3,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 /// Actions the engine can take when a rule matches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Action {
     Allow,
     Deny,
@@ -11,6 +12,19 @@ pub enum Action {
     Log,
     RequireApproval,
     Redirect,
+}
+
+impl Action {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+            Self::Throttle => "throttle",
+            Self::Log => "log",
+            Self::RequireApproval => "require_approval",
+            Self::Redirect => "redirect",
+        }
+    }
 }
 
 /// A policy failed validation before it could be enforced.
@@ -97,5 +111,16 @@ pub struct PolicyCall {
 #[derive(Debug, Clone)]
 pub struct Decision {
     pub action: Action,
+    pub matched_rules: Vec<usize>,
+}
+
+/// The structured audit record emitted for a policy decision.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AuditEntry {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub agent: Option<String>,
+    pub tool: Option<String>,
+    pub args: Vec<String>,
+    pub decision: Action,
     pub matched_rules: Vec<usize>,
 }

@@ -18,11 +18,11 @@ fn test_audit_log_entry_created() {
         matched_rules: vec![0],
     };
     let entry = logger.log(&call, &decision);
-    assert_eq!(entry.get("agent").unwrap(), "bot");
-    assert_eq!(entry.get("tool").unwrap(), "curl");
-    assert_eq!(entry.get("decision").unwrap(), "deny");
-    assert_eq!(entry.get("matched_rules").unwrap(), "[0]");
-    assert!(entry.contains_key("timestamp"));
+    assert_eq!(entry.agent.as_deref(), Some("bot"));
+    assert_eq!(entry.tool.as_deref(), Some("curl"));
+    assert_eq!(entry.decision, HpAction::Deny);
+    assert_eq!(entry.matched_rules, vec![0]);
+    assert!(entry.timestamp.timestamp() > 0);
 }
 
 #[test]
@@ -40,5 +40,9 @@ fn test_audit_log_entry_includes_args() {
         matched_rules: Vec::new(),
     };
     let entry = logger.log(&call, &decision);
-    assert_eq!(entry.get("args").unwrap(), "[\"/tmp/test.txt\"]");
+    assert_eq!(entry.args, vec!["/tmp/test.txt"]);
+
+    let serialized = serde_json::to_value(entry).expect("audit entry serializes");
+    assert_eq!(serialized["args"], serde_json::json!(["/tmp/test.txt"]));
+    assert_eq!(serialized["matched_rules"], serde_json::json!([]));
 }

@@ -45,7 +45,7 @@ pub fn run_demo() -> Vec<(Action, String)> {
             };
             let decision = engine.resolve_call(&call);
             let entry = logger.log(&call, &decision);
-            (decision.action, entry.get("decision").unwrap().to_string())
+            (decision.action, entry.decision.as_str().to_owned())
         },
         // Test: GET allowed
         {
@@ -58,7 +58,7 @@ pub fn run_demo() -> Vec<(Action, String)> {
             };
             let decision = engine.resolve_call(&call);
             let entry = logger.log(&call, &decision);
-            (decision.action, entry.get("decision").unwrap().to_string())
+            (decision.action, entry.decision.as_str().to_owned())
         },
     ];
 
