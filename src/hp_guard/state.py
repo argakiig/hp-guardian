@@ -89,7 +89,11 @@ class RateLimitedPolicyStore:
         self._engine = engine
         self._digest = hashlib.sha256(policy_text.encode("utf-8")).hexdigest()
         self._state_store = state_store
-        self._now = now_monotonic_seconds or (lambda: time.monotonic_ns() // 1_000_000_000)
+        if now_monotonic_seconds is not None:
+            self._now = now_monotonic_seconds
+        else:
+            started = time.monotonic()
+            self._now = lambda: int(time.monotonic() - started)
 
     def resolve(self, call: PolicyCall) -> Decision:
         decision, selected_rule = self._engine._resolve_call_at(call, _utc_now())

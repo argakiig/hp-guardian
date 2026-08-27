@@ -18,6 +18,9 @@ This creates an enforceable decision, not a sleep, retry, or tool execution.
   is deliberately out of scope.
 - Production uses a monotonic clock. An injected clock that moves backwards
   fails closed instead of resetting a window.
+- When no clock is injected, both runtimes anchor the default monotonic clock at
+  policy-store construction (integer seconds since the store was created), so a
+  freshly built store starts each window from its own creation time.
 
 ## Policy Contract
 
