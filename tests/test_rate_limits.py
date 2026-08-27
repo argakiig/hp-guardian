@@ -60,6 +60,17 @@ def test_state_capacity_exhaustion_fails_closed() -> None:
     assert raised.value.code == "state_unavailable"
 
 
+def test_stale_window_buckets_are_evicted_before_capacity_fails_closed() -> None:
+    now = [60]
+    store = RateLimitedPolicyStore(
+        POLICY, InMemoryRateLimitStore(max_keys=1), now_monotonic_seconds=lambda: now[0]
+    )
+    assert store.resolve(PolicyCall(agent="first", tool="search")).action.value == "allow"
+
+    now[0] = 121
+    assert store.resolve(PolicyCall(agent="second", tool="search")).action.value == "allow"
+
+
 def test_custom_store_failures_and_invalid_results_are_mapped_to_state_unavailable() -> None:
     class BrokenStore:
         def check_and_consume(self, _key, _limit, _now):

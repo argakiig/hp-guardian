@@ -83,6 +83,44 @@ fn monotonic_clock_regression_fails_closed() {
 }
 
 #[test]
+fn stale_window_buckets_are_evicted_before_capacity_fails_closed() {
+    let now = Arc::new(AtomicU64::new(60));
+    let clock = {
+        let now = Arc::clone(&now);
+        Arc::new(move || now.load(Ordering::Relaxed))
+    };
+    let store = RateLimitedPolicyStore::with_clock(
+        POLICY,
+        Arc::new(InMemoryRateLimitStore::with_capacity(1).expect("capacity")),
+        clock,
+    )
+    .expect("policy");
+    assert_eq!(
+        store
+            .resolve(&PolicyCall {
+                agent: Some("first".into()),
+                ..search_call()
+            })
+            .expect("decision")
+            .action
+            .as_str(),
+        "allow"
+    );
+    now.store(121, Ordering::Relaxed);
+    assert_eq!(
+        store
+            .resolve(&PolicyCall {
+                agent: Some("second".into()),
+                ..search_call()
+            })
+            .expect("decision")
+            .action
+            .as_str(),
+        "allow"
+    );
+}
+
+#[test]
 fn state_capacity_exhaustion_fails_closed() {
     let store = RateLimitedPolicyStore::with_clock(
         POLICY,

@@ -98,9 +98,6 @@ impl RateLimitStore for InMemoryRateLimitStore {
             return Err(StateError);
         }
         inner.last_now = Some(now_seconds);
-        if !inner.buckets.contains_key(key) && inner.buckets.len() >= self.max_keys {
-            return Err(StateError);
-        }
         let window_start = now_seconds - now_seconds % limit.window_seconds;
         let (previous_start, mut count) =
             inner.buckets.get(key).copied().unwrap_or((window_start, 0));
@@ -110,6 +107,14 @@ impl RateLimitStore for InMemoryRateLimitStore {
         if count >= limit.max_calls {
             inner.buckets.insert(key.clone(), (window_start, count));
             return Ok(false);
+        }
+        if !inner.buckets.contains_key(key) && inner.buckets.len() >= self.max_keys {
+            inner
+                .buckets
+                .retain(|_, &mut (start, _count)| start == window_start);
+        }
+        if !inner.buckets.contains_key(key) && inner.buckets.len() >= self.max_keys {
+            return Err(StateError);
         }
         inner.buckets.insert(key.clone(), (window_start, count + 1));
         Ok(true)

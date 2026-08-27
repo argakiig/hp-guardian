@@ -51,8 +51,6 @@ class InMemoryRateLimitStore:
             if self._last_now is not None and now_seconds < self._last_now:
                 raise StateError("state_unavailable", "monotonic clock regressed")
             self._last_now = now_seconds
-            if key not in self._buckets and len(self._buckets) >= self._max_keys:
-                raise StateError("state_unavailable", "rate-limit state capacity is exhausted")
             window_start = now_seconds - now_seconds % limit.window_seconds
             previous_start, count = self._buckets.get(key, (window_start, 0))
             if previous_start != window_start:
@@ -60,8 +58,21 @@ class InMemoryRateLimitStore:
             if count >= limit.max_calls:
                 self._buckets[key] = (window_start, count)
                 return False
+            if key not in self._buckets and len(self._buckets) >= self._max_keys:
+                self._prune_stale_buckets(window_start)
+            if key not in self._buckets and len(self._buckets) >= self._max_keys:
+                raise StateError("state_unavailable", "rate-limit state capacity is exhausted")
             self._buckets[key] = (window_start, count + 1)
             return True
+
+    def _prune_stale_buckets(self, current_window_start: int) -> None:
+        stale = [
+            key
+            for key, (window_start, _count) in self._buckets.items()
+            if window_start != current_window_start
+        ]
+        for key in stale:
+            del self._buckets[key]
 
 
 class RateLimitedPolicyStore:
