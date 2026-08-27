@@ -8,6 +8,7 @@ pub mod models;
 pub mod parser;
 pub mod simulator;
 pub mod state;
+pub(crate) mod util;
 
 // Re-export key types for convenience.
 pub use adapter::{

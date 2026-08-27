@@ -150,7 +150,7 @@ impl RateLimitedPolicyStore {
         let engine = PolicyParser::parse_rate_limited(policy_text)?;
         Ok(Self {
             engine,
-            policy_digest: format!("{:x}", Sha256::digest(policy_text.as_bytes())),
+            policy_digest: crate::util::to_hex(&Sha256::digest(policy_text.as_bytes())),
             state_store,
             now_monotonic_seconds,
         })

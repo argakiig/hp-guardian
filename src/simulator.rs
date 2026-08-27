@@ -23,7 +23,7 @@ impl SimulationPolicy {
         Ok(Self {
             identity: PolicyIdentity {
                 version: TRACE_VERSION,
-                sha256: format!("{digest:x}"),
+                sha256: crate::util::to_hex(&digest),
             },
             engine,
         })

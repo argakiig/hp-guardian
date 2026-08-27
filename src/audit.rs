@@ -25,7 +25,7 @@ pub struct PolicySnapshot {
 impl PolicySnapshot {
     fn parse(policy_text: &str) -> Result<Self, AuditError> {
         let engine = PolicyParser::parse(policy_text).map_err(AuditError::Policy)?;
-        let digest = format!("{:x}", Sha256::digest(policy_text.as_bytes()));
+        let digest = crate::util::to_hex(&Sha256::digest(policy_text.as_bytes()));
 
         // PolicyParser currently accepts only v1. Version dispatch remains its
         // responsibility; the snapshot records the accepted language version.
